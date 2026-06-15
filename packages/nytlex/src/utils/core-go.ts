@@ -118,7 +118,7 @@ export class CoreGoManager {
       }
       return bestCoreGo;
     } catch (error) {
-      Console.error(`Failed to read registry.json: ${error}`);
+      Console.error(`Failed to read registry.json: `, error);
       return null;
     }
   }
