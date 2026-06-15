@@ -1,6 +1,6 @@
 {
   "name": "@nytlex/create",
-  "version": "1.2.2",
+  "version": "0.0.1-canary.0",
   "description": "CLI tool to create a new Nytlex.js application",
   "main": "dist/index.js",
   "bin": {
