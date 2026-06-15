@@ -171,8 +171,8 @@ jobs:
           AWS_ACCESS_KEY_ID: ${{ secrets.S3_ACCESS_KEY }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.S3_SECRET_KEY }}
           AWS_DEFAULT_REGION: us-east-1 # Dummy, requirido pela CLI da AWS
-          S3_ENDPOINT: https://s3-server.br-1.mfraz.ovh/
-          BUCKET: nytlex-go
+          S3_ENDPOINT: https://s3.mfraz.ovh
+          BUCKET: nytlex-core
           CORE_VERSION: ${{ needs.check.outputs.core_go_version }}
           NYTLEX_VERSION: ${{ needs.check.outputs.version }}
         run: |
