@@ -1,0 +1,291 @@
+name: Release and Core-Go Build
+
+on:
+  push:
+    branches:
+      - canary # A sua branch de desenvolvimento
+    paths:
+      - 'package.json'
+      - 'services/core-go/**'
+      - 'packages/@nytlex-create/package.json'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  # ----------------------------------------------------------------
+  # 1. VERIFICA O QUE MUDOU (Go ou Release NPM?)
+  # ----------------------------------------------------------------
+  check:
+    if: "!contains(github.event.head_commit.message, 'chore(release)')"
+    runs-on: ubuntu-latest
+    outputs:
+      core_go_changed: ${{ steps.check.outputs.core_go_changed }}
+      version_changed: ${{ steps.check.outputs.version_changed }}
+      version: ${{ steps.check.outputs.version }}
+      core_go_version: ${{ steps.check.outputs.core_go_version }}
+      cva_version_changed: ${{ steps.check.outputs.cva_version_changed }}
+      cva_version: ${{ steps.check.outputs.cva_version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: 🔍 Verificar O Que Mudou
+        id: check
+        run: |
+          # Checa alteração nos arquivos do Go
+          if git diff --name-only HEAD~1 HEAD | grep -q "^services/core-go/"; then
+            echo "core_go_changed=true" >> $GITHUB_OUTPUT
+          else
+            echo "core_go_changed=false" >> $GITHUB_OUTPUT
+          fi
+
+          # Checa alteração na versão root 
+          OLD_VERSION=$(git show HEAD~1:package.json | jq -r .version || echo "0.0.0")
+          NEW_VERSION=$(jq -r .version package.json)
+          
+          if [ "$OLD_VERSION" != "$NEW_VERSION" ]; then
+            echo "version_changed=true" >> $GITHUB_OUTPUT
+            echo "version=$NEW_VERSION" >> $GITHUB_OUTPUT
+          else
+            echo "version_changed=false" >> $GITHUB_OUTPUT
+          fi
+
+          # Pega a versão do core-go
+          CORE_VERSION=$(jq -r .version services/core-go/package.json)
+          echo "core_go_version=$CORE_VERSION" >> $GITHUB_OUTPUT
+
+          # Checa alteração na versão do @nytlex-create
+          OLD_CVA_VERSION=$(git show HEAD~1:packages/@nytlex-create/package.json 2>/dev/null | jq -r .version || echo "0.0.0")
+          NEW_CVA_VERSION=$(jq -r .version packages/@nytlex-create/package.json 2>/dev/null || echo "0.0.0")
+          
+          if [ "$OLD_CVA_VERSION" != "$NEW_CVA_VERSION" ] && [ "$NEW_CVA_VERSION" != "0.0.0" ]; then
+            echo "cva_version_changed=true" >> $GITHUB_OUTPUT
+            echo "cva_version=$NEW_CVA_VERSION" >> $GITHUB_OUTPUT
+          else
+            echo "cva_version_changed=false" >> $GITHUB_OUTPUT
+          fi
+
+  # ----------------------------------------------------------------
+  # 2. MATRIX BUILD (Roda Windows, macOS e Linux paralelamente)
+  # ----------------------------------------------------------------
+  build-core-go:
+    needs: check
+    if: needs.check.outputs.core_go_changed == 'true' || needs.check.outputs.version_changed == 'true'
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash # Garante que comandos bash funcionem no Windows
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+
+      - name: 📦 Instalar dependências (go mod tidy)
+        working-directory: services/core-go
+        run: go mod tidy
+
+      - name: 🔨 Compilar Core-Go (Linux & Alpine)
+        if: matrix.os == 'ubuntu-latest'
+        working-directory: services/core-go
+        run: |
+          export CGO_ENABLED=1
+          export GOFLAGS=-trimpath
+          mkdir -p binaries
+
+          echo "🚀 Compilando Linux x64..."
+          go build -buildmode=c-shared -ldflags="-s -w -buildid=" -o ./binaries/core-linux-x64.node .
+
+          echo "🚀 Compilando Linux ARM64 (Cross)..."
+          sudo apt-get update && sudo apt-get install -y gcc-aarch64-linux-gnu gcc-arm-linux-gnueabihf
+          CC=aarch64-linux-gnu-gcc GOARCH=arm64 go build -buildmode=c-shared -ldflags="-s -w -buildid=" -o ./binaries/core-linux-arm64.node .
+
+          echo "🚀 Compilando Alpine x64 (Musl)..."
+          sudo apt-get install -y musl-tools
+          CC=musl-gcc go build -buildmode=c-shared -ldflags="-s -w -buildid=" -o ./binaries/core-alpine-x64.node .
+
+          echo "🚀 Compilando Alpine ARM64 (Musl)..."
+          CC=aarch64-linux-gnu-gcc GOARCH=arm64 go build -buildmode=c-shared -ldflags="-s -w -buildid=" -o ./binaries/core-alpine-arm64.node .
+
+          echo "🚀 Compilando Alpine ARMv7 (Musl)..."
+          CC=arm-linux-gnueabihf-gcc GOARCH=arm GOARM=7 go build -buildmode=c-shared -ldflags="-s -w -buildid=" -o ./binaries/core-alpine-armv7.node .
+
+      - name: 🔨 Compilar Core-Go (Windows)
+        if: matrix.os == 'windows-latest'
+        working-directory: services/core-go
+        run: |
+          export CGO_ENABLED=1
+          export GOFLAGS=-trimpath
+          mkdir -p binaries
+
+          echo "🚀 Compilando Windows x64..."
+          GOARCH=amd64 go build -buildmode=c-shared -ldflags="-s -w -buildid= -extldflags '-static-libgcc -static-libstdc++ -Wl,-Bstatic -lpthread -Wl,-Bdynamic'" -o ./binaries/core-win-x64.node .
+      - name: 🔨 Compilar Core-Go (macOS)
+        if: matrix.os == 'macos-latest'
+        working-directory: services/core-go
+        run: |
+          export CGO_ENABLED=1
+          export GOFLAGS=-trimpath
+          mkdir -p binaries
+
+          echo "🚀 Compilando macOS Intel (x64)..."
+          GOARCH=amd64 go build -tags "netgo,osusergo" -buildmode=c-shared -ldflags="-s -w -buildid= -extldflags '-undefined dynamic_lookup'" -o ./binaries/core-darwin-x64.node .
+
+          echo "🚀 Compilando macOS Apple Silicon (ARM64)..."
+          GOARCH=arm64 go build -tags "netgo,osusergo" -buildmode=c-shared -ldflags="-s -w -buildid= -extldflags '-undefined dynamic_lookup'" -o ./binaries/core-darwin-arm64.node .
+
+      - name: 💾 Salvar Binários Temporariamente
+        uses: actions/upload-artifact@v4
+        with:
+          name: binaries-${{ matrix.os }}
+          path: services/core-go/binaries/*.node
+          retention-days: 1
+
+  # ----------------------------------------------------------------
+  # 3. UPLOAD S3 (Coleta os artefatos da matrix e joga no bucket)
+  # ----------------------------------------------------------------
+  upload-s3:
+    needs: [check, build-core-go]
+    runs-on: ubuntu-latest
+    steps:
+      - name: 📥 Baixar todos os Binários
+        uses: actions/download-artifact@v4
+        with:
+          pattern: binaries-*
+          merge-multiple: true
+          path: final-binaries
+
+      - name: ☁️ Sincronizar com S3 e Atualizar registry.json
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.S3_ACCESS_KEY }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.S3_SECRET_KEY }}
+          AWS_DEFAULT_REGION: us-east-1 # Dummy, requirido pela CLI da AWS
+          S3_ENDPOINT: https://s3-server.br-1.mfraz.ovh/
+          BUCKET: nytlex-go
+          CORE_VERSION: ${{ needs.check.outputs.core_go_version }}
+          NYTLEX_VERSION: ${{ needs.check.outputs.version }}
+        run: |
+          echo "📤 Subindo binários para a pasta: /$CORE_VERSION/ ..."
+          aws s3 sync ./final-binaries/ s3://$BUCKET/$CORE_VERSION/ --endpoint-url $S3_ENDPOINT
+
+          echo "📝 Atualizando registry.json ..."
+          # Tenta baixar o registry.json existente. Se não existir, cria um objeto vazio.
+          aws s3 cp s3://$BUCKET/registry.json registry.json --endpoint-url $S3_ENDPOINT || echo "{}" > registry.json
+
+          # Adiciona/Atualiza a versão no JSON
+          jq ". + {\"$CORE_VERSION\": \"$NYTLEX_VERSION\"}" registry.json > temp.json && mv temp.json registry.json
+          
+          # Mostra o JSON no log para conferência
+          cat registry.json
+
+          echo "📤 Subindo registry.json de volta pro S3..."
+          aws s3 cp registry.json s3://$BUCKET/registry.json --endpoint-url $S3_ENDPOINT
+
+  # ----------------------------------------------------------------
+  # 4. PUBLISH NPM & GITHUB RELEASE (Apenas se a versão root mudou)
+  # ----------------------------------------------------------------
+  release-npm:
+    needs: [check, upload-s3] # Espera o S3 terminar para evitar publicar pacote quebrado
+    if: |
+      always() &&
+      needs.check.result == 'success' &&
+      (needs.upload-s3.result == 'success' || needs.upload-s3.result == 'skipped') &&
+      (needs.check.outputs.version_changed == 'true' || needs.check.outputs.cva_version_changed == 'true')
+    runs-on: ubuntu-latest
+    env:
+      NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      NEW_VERSION: ${{ needs.check.outputs.version }}
+      VERSION_CHANGED: ${{ needs.check.outputs.version_changed }}
+      CVA_VERSION_CHANGED: ${{ needs.check.outputs.cva_version_changed }}
+      CVA_VERSION: ${{ needs.check.outputs.cva_version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
+      - uses: pnpm/action-setup@v3
+        with:
+          version: 10.20.0
+
+      - name: 📥 Instalar Dependências
+        run: pnpm install
+
+      - name: 🚀 Fluxo de Release
+        run: |
+          if [ "$VERSION_CHANGED" == "true" ]; then
+            echo "🔄 Sincronizando versões nos pacotes nytlex e auth (Apenas no ambiente do Runner)..."
+            for pkg in "packages/nytlex" "packages/auth"; do
+              if [ -f "$pkg/package.json" ]; then
+                jq ".version = \"$NEW_VERSION\"" $pkg/package.json > tmp.json && mv tmp.json $pkg/package.json
+                if jq -e '.dependencies["nytlex"]' $pkg/package.json > /dev/null; then
+                  jq ".dependencies[\"nytlex\"] = \"^$NEW_VERSION\"" $pkg/package.json > tmp.json && mv tmp.json $pkg/package.json
+                fi
+              fi
+            done
+          fi
+
+          echo "📦 Rodando Build do Framework..."
+          pnpm run build
+
+          CURRENT_BRANCH=$GITHUB_REF_NAME
+
+          if [ "$VERSION_CHANGED" == "true" ]; then
+            IS_CANARY=false
+            if [[ "$NEW_VERSION" == *"canary"* ]] || [[ "$NEW_VERSION" == *"alpha"* ]]; then IS_CANARY=true; fi
+
+            echo "📤 Enviando pacotes principais para o npm..."
+            TAG_ARG=""
+            if [ "$IS_CANARY" = true ]; then TAG_ARG="--tag canary"; fi
+            pnpm publish -r --filter "./packages/nytlex" --filter "./packages/auth" --no-git-checks --access=public $TAG_ARG
+          fi
+
+          if [ "$CVA_VERSION_CHANGED" == "true" ]; then
+            IS_CVA_CANARY=false
+            if [[ "$CVA_VERSION" == *"canary"* ]] || [[ "$CVA_VERSION" == *"alpha"* ]]; then IS_CVA_CANARY=true; fi
+
+            echo "📤 Enviando @nytlex/create para o npm..."
+            CVA_TAG_ARG=""
+            if [ "$IS_CVA_CANARY" = true ]; then CVA_TAG_ARG="--tag canary"; fi
+            pnpm publish -r --filter "./packages/@nytlex-create" --no-git-checks --access=public $CVA_TAG_ARG
+          fi
+
+          echo "🧹 Limpando injeções (Prevenindo erro de uncommitted changes no Git)..."
+          git reset --hard HEAD
+
+          echo "🏷️ Criando Release no GitHub..."
+          RELEASE_NOTES=$(git log -1 --pretty=%B | tr -d '"')
+          
+          if [ "$VERSION_CHANGED" == "true" ]; then
+            RELEASE_TAG="v$NEW_VERSION"
+            IS_PRERELEASE=$IS_CANARY
+          else
+            RELEASE_TAG="@nytlex-create-app-v$CVA_VERSION"
+            IS_PRERELEASE=$IS_CVA_CANARY
+          fi
+
+          TARGET_BRANCH="latest"
+          PRERELEASE_FLAG=""
+
+          if [ "$IS_PRERELEASE" = true ]; then
+            TARGET_BRANCH=$CURRENT_BRANCH
+            PRERELEASE_FLAG="--prerelease"
+          else
+            git fetch origin latest || true
+            git checkout -B latest
+            git push origin latest --force
+          fi
+
+          gh release create $RELEASE_TAG --title "$RELEASE_TAG" --notes "$RELEASE_NOTES" --target $TARGET_BRANCH $PRERELEASE_FLAG || echo "A release possivelmente já existe."
