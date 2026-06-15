@@ -28,8 +28,8 @@ export class CoreGoManager {
 
   constructor(currentNytlexVersion: string, customBinDir?: string) {
     this.currentNytlexVersion = currentNytlexVersion;
-    this.registryUrl = "https://s3-server.br-1.mfraz.ovh/nytlex-go/registry.json";
-    this.s3BaseUrl = "https://s3-server.br-1.mfraz.ovh/nytlex-go/";
+    this.registryUrl = "https://s3.mfraz.ovh/nytlex-core/registry.json";
+    this.s3BaseUrl = "https://s3.mfraz.ovh/nytlex-core/";
 
     // Pasta onde o binário será salvo (padrão: mesma pasta desse script, mas pode ser node_modules)
     this.binDir = customBinDir || path.join(__dirname, '..', '..', 'core-go-bin');
