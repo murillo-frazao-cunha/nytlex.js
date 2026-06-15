@@ -1,0 +1,48 @@
+{
+  "name": "core-go",
+  "version": "1.0.1",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "build:windows": "pnpm run build:win-x64 && pnpm run build:win-arm64",
+    "build:windows-linux": "pnpm run build:win-x64-linux && pnpm run build:win-arm64-linux",
+
+    "build:win-x64": "set \"CGO_ENABLED=1\" && set \"GOFLAGS=-trimpath\" && set \"GOMAXPROCS=8\" && set \"ZIG_GLOBAL_CACHE_DIR=%CD%\\.zig-cache\" && set \"ZIG_LOCAL_CACHE_DIR=%CD%\\.zig-cache\" && set \"GOOS=windows\" && set \"GOARCH=amd64\" && set \"CC=zig cc -target x86_64-windows-gnu\" && go build -buildmode=c-shared -ldflags=\"-s -w -buildid= -extldflags '-static-libgcc -static-libstdc++ -Wl,-Bstatic -lpthread -Wl,-Bdynamic'\" -o ./binaries/core-win-x64.node .",
+    "build:win-arm64": "set \"CGO_ENABLED=1\" && set \"GOFLAGS=-trimpath\" && set \"GOMAXPROCS=8\" && set \"ZIG_GLOBAL_CACHE_DIR=%CD%\\.zig-cache\" && set \"ZIG_LOCAL_CACHE_DIR=%CD%\\.zig-cache\" && set \"GOOS=windows\" && set \"GOARCH=arm64\" && set \"CC=zig cc -target aarch64-windows-gnu\" && go build -buildmode=c-shared -ldflags=\"-s -w -buildid= -extldflags '-static-libgcc -static-libstdc++ -Wl,-Bstatic -lpthread -Wl,-Bdynamic'\" -o ./binaries/core-win-arm64.node .",
+    "build:win-x64-linux": "CGO_ENABLED=1 GOFLAGS=-trimpath GOMAXPROCS=8 GOOS=windows GOARCH=amd64 CC=\"zig cc -target x86_64-windows-gnu\" go build -buildmode=c-shared -ldflags=\"-s -w -buildid= -extldflags '-static-libgcc -static-libstdc++ -Wl,-Bstatic -lpthread -Wl,-Bdynamic'\" -o ./binaries/core-win-x64.node .",
+    "build:win-arm64-linux": "CGO_ENABLED=1 GOFLAGS=-trimpath GOMAXPROCS=8 GOOS=windows GOARCH=arm64 CC=\"zig cc -target aarch64-windows-gnu\" go build -buildmode=c-shared -ldflags=\"-s -w -buildid= -extldflags '-static-libgcc -static-libstdc++ -Wl,-Bstatic -lpthread -Wl,-Bdynamic'\" -o ./binaries/core-win-arm64.node .",
+
+    "build:linux": "pnpm run build:linux-x64 && pnpm run build:linux-arm64",
+    "build:linux-linux": "pnpm run build:linux-x64-linux && pnpm run build:linux-arm64-linux",
+
+    "build:linux-x64": "set \"CGO_ENABLED=1\" && set \"GOFLAGS=-trimpath\" && set \"GOMAXPROCS=8\" && set \"ZIG_GLOBAL_CACHE_DIR=%CD%\\.zig-cache\" && set \"ZIG_LOCAL_CACHE_DIR=%CD%\\.zig-cache\" && set \"GOOS=linux\" && set \"GOARCH=amd64\" && set \"CC=zig cc -target x86_64-linux-gnu\" && go build -buildmode=c-shared -ldflags=\"-s -w -buildid=\" -o ./binaries/core-linux-x64.node .",
+    "build:linux-arm64": "set \"CGO_ENABLED=1\" && set \"GOFLAGS=-trimpath\" && set \"GOMAXPROCS=8\" && set \"ZIG_GLOBAL_CACHE_DIR=%CD%\\.zig-cache\" && set \"ZIG_LOCAL_CACHE_DIR=%CD%\\.zig-cache\" && set \"GOOS=linux\" && set \"GOARCH=arm64\" && set \"CC=zig cc -target aarch64-linux-gnu\" && go build -buildmode=c-shared -ldflags=\"-s -w -buildid=\" -o ./binaries/core-linux-arm64.node .",
+    "build:linux-x64-linux": "CGO_ENABLED=1 GOFLAGS=-trimpath GOMAXPROCS=8 GOOS=linux GOARCH=amd64 CC=\"zig cc -target x86_64-linux-gnu\" go build -buildmode=c-shared -ldflags=\"-s -w -buildid=\" -o ./binaries/core-linux-x64.node .",
+    "build:linux-arm64-linux": "CGO_ENABLED=1 GOFLAGS=-trimpath GOMAXPROCS=8 GOOS=linux GOARCH=arm64 CC=\"zig cc -target aarch64-linux-gnu\" go build -buildmode=c-shared -ldflags=\"-s -w -buildid=\" -o ./binaries/core-linux-arm64.node .",
+ 
+    "build:alpine": "pnpm run build:alpine-x64 && pnpm run build:alpine-arm64 && pnpm run build:alpine-armv7",
+    "build:alpine-linux": "pnpm run build:alpine-x64-linux && pnpm run build:alpine-arm64-linux && pnpm run build:alpine-armv7-linux",
+
+    "build:alpine-x64": "set \"CGO_ENABLED=1\" && set \"GOFLAGS=-trimpath\" && set \"GOMAXPROCS=8\" && set \"ZIG_GLOBAL_CACHE_DIR=%CD%\\.zig-cache\" && set \"ZIG_LOCAL_CACHE_DIR=%CD%\\.zig-cache\" && set \"GOOS=linux\" && set \"GOARCH=amd64\" && set \"CC=zig cc -target x86_64-linux-musl\" && go build -buildmode=c-shared -ldflags=\"-s -w -buildid=\" -o ./binaries/core-alpine-x64.node .",
+    "build:alpine-arm64": "set \"CGO_ENABLED=1\" && set \"GOFLAGS=-trimpath\" && set \"GOMAXPROCS=8\" && set \"ZIG_GLOBAL_CACHE_DIR=%CD%\\.zig-cache\" && set \"ZIG_LOCAL_CACHE_DIR=%CD%\\.zig-cache\" && set \"GOOS=linux\" && set \"GOARCH=arm64\" && set \"CC=zig cc -target aarch64-linux-musl\" && go build -buildmode=c-shared -ldflags=\"-s -w -buildid=\" -o ./binaries/core-alpine-arm64.node .",
+    "build:alpine-armv7": "set \"CGO_ENABLED=1\" && set \"GOFLAGS=-trimpath\" && set \"GOMAXPROCS=8\" && set \"ZIG_GLOBAL_CACHE_DIR=%CD%\\.zig-cache\" && set \"ZIG_LOCAL_CACHE_DIR=%CD%\\.zig-cache\" && set \"GOOS=linux\" && set \"GOARCH=arm\" && set \"GOARM=7\" && set \"CC=zig cc -target arm-linux-musleabihf\" && go build -buildmode=c-shared -ldflags=\"-s -w -buildid=\" -o ./binaries/core-alpine-armv7.node .",
+    "build:alpine-x64-linux": "CGO_ENABLED=1 GOFLAGS=-trimpath GOMAXPROCS=8 GOOS=linux GOARCH=amd64 CC=\"zig cc -target x86_64-linux-musl\" go build -buildmode=c-shared -ldflags=\"-s -w -buildid=\" -o ./binaries/core-alpine-x64.node .",
+    "build:alpine-arm64-linux": "CGO_ENABLED=1 GOFLAGS=-trimpath GOMAXPROCS=8 GOOS=linux GOARCH=arm64 CC=\"zig cc -target aarch64-linux-musl\" go build -buildmode=c-shared -ldflags=\"-s -w -buildid=\" -o ./binaries/core-alpine-arm64.node .",
+    "build:alpine-armv7-linux": "CGO_ENABLED=1 GOFLAGS=-trimpath GOMAXPROCS=8 GOOS=linux GOARCH=arm GOARM=7 CC=\"zig cc -target arm-linux-musleabihf\" go build -buildmode=c-shared -ldflags=\"-s -w -buildid=\" -o ./binaries/core-alpine-armv7.node .",
+
+    "build:macos": "pnpm run build:macos-intel && pnpm run build:macos-arm",
+    "build:macos-linux": "pnpm run build:macos-intel-linux && pnpm run build:macos-arm-linux",
+
+    "build:macos-intel": "set \"CGO_ENABLED=1\" && set \"GOFLAGS=-trimpath\" && set \"GOMAXPROCS=8\" && set \"ZIG_GLOBAL_CACHE_DIR=%CD%\\.zig-cache\" && set \"ZIG_LOCAL_CACHE_DIR=%CD%\\.zig-cache\" && set \"GOOS=darwin\" && set \"GOARCH=amd64\" && set \"CC=zig cc -target x86_64-macos --sysroot %CD%\\MacOSX11.3.sdk -isysroot %CD%\\MacOSX11.3.sdk -L/usr/lib -F %CD%\\MacOSX11.3.sdk\\System\\Library\\Frameworks\" && go build -tags \"netgo,osusergo\" -buildmode=c-shared -ldflags=\"-s -w -buildid= -extldflags '-undefined dynamic_lookup'\" -o ./binaries/core-darwin-x64.node .",
+    "build:macos-arm": "set \"CGO_ENABLED=1\" && set \"GOFLAGS=-trimpath\" && set \"GOMAXPROCS=8\" && set \"ZIG_GLOBAL_CACHE_DIR=%CD%\\.zig-cache\" && set \"ZIG_LOCAL_CACHE_DIR=%CD%\\.zig-cache\" && set \"GOOS=darwin\" && set \"GOARCH=arm64\" && set \"CC=zig cc -target aarch64-macos --sysroot %CD%\\MacOSX11.3.sdk -isysroot %CD%\\MacOSX11.3.sdk -L/usr/lib -F %CD%\\MacOSX11.3.sdk\\System\\Library\\Frameworks\" && go build -tags \"netgo,osusergo\" -buildmode=c-shared -ldflags=\"-s -w -buildid= -extldflags '-undefined dynamic_lookup'\" -o ./binaries/core-darwin-arm64.node .",
+    "build:macos-intel-linux": "CGO_ENABLED=1 GOFLAGS=-trimpath GOMAXPROCS=8 GOOS=darwin GOARCH=amd64 CC=\"zig cc -target x86_64-macos --sysroot $PWD/MacOSX11.3.sdk -isysroot $PWD/MacOSX11.3.sdk -L/usr/lib -F $PWD/MacOSX11.3.sdk/System/Library/Frameworks\" go build -tags \"netgo,osusergo\" -buildmode=c-shared -ldflags=\"-s -w -buildid= -extldflags '-undefined dynamic_lookup'\" -o ./binaries/core-darwin-x64.node .",
+    "build:macos-arm-linux": "CGO_ENABLED=1 GOFLAGS=-trimpath GOMAXPROCS=8 GOOS=darwin GOARCH=arm64 CC=\"zig cc -target aarch64-macos --sysroot $PWD/MacOSX11.3.sdk -isysroot $PWD/MacOSX11.3.sdk -L/usr/lib -F $PWD/MacOSX11.3.sdk/System/Library/Frameworks\" go build -tags \"netgo,osusergo\" -buildmode=c-shared -ldflags=\"-s -w -buildid= -extldflags '-undefined dynamic_lookup'\" -o ./binaries/core-darwin-arm64.node .",
+
+    "build": "pnpm run build:windows && pnpm run build:linux && pnpm run build:alpine && pnpm run build:macos",
+    "build-on-linux": "pnpm run build:windows-linux && pnpm run build:linux-linux && pnpm run build:alpine-linux && pnpm run build:macos-linux"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "packageManager": "pnpm@10.20.0"
+}

@@ -1,0 +1,13 @@
+packages:
+  - packages/*
+  - examples/*
+  - docs/
+  - services/*
+
+ignoredBuiltDependencies:
+  - better-sqlite3
+  - esbuild
+  - koffi
+  - sharp
+  - sqlite3
+  - unrs-resolver

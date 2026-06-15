@@ -1,0 +1,19 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "NodeNext",
+    "rootDir": "./src",
+    "outDir": "./dist",
+    "declaration": true,
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "jsx": "react-jsx",
+    "moduleResolution": "nodenext",
+    "allowJs": true,
+    "rewriteRelativeImportExtensions": true,
+    "types": ["nytlex/global"]
+  },
+  "include": ["src"],
+  "exclude": ["node_modules", "dist"]
+}

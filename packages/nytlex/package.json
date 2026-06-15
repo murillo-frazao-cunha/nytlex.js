@@ -1,0 +1,165 @@
+{
+  "name": "nytlex",
+  "description": "Nytlex.js is a high-level framework for building web applications with ease and speed. It provides a robust set of tools and features to streamline development and enhance productivity.",
+  "types": "dist/index.d.ts",
+  "author": "mfraz",
+  "license": "Apache-2.0",
+  "packageManager": "pnpm@10.28.1+sha512.7d7dbbca9e99447b7c3bf7a73286afaaf6be99251eb9498baefa7d406892f67b879adb3a1d7e687fc4ccc1a388c7175fbaae567a26ab44d1067b54fcb0d6a316",
+  "keywords": [
+    "nytlex",
+    "nytlex",
+    "framework",
+    "web",
+    "typescript",
+    "react"
+  ],
+  "files": [
+    "dist",
+    "README.md",
+    "dist/global/global.d.ts"
+  ],
+  "bin": {
+    "nytlex": "./dist/bin/nytlex.js"
+  },
+  "scripts": {
+    "build": "tsc && npx cpx2 \"src/**/**/**/*.{svelte,vue,d.ts}\" dist"
+  },
+  "typesVersions": {
+    "*": {
+      "global": [
+        "dist/global/global.d.ts"
+      ],
+      "console": [
+        "dist/api/console.d.ts"
+      ],
+      "rpc": [
+        "dist/rpc/annotations.d.ts"
+      ]
+    }
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.js"
+    },
+    "./console": {
+      "types": "./dist/api/console.d.ts",
+      "import": "./dist/api/console.js",
+      "require": "./dist/api/console.js"
+    },
+    "./react": {
+      "types": "./dist/frameworks/react/client.d.ts",
+      "import": "./dist/frameworks/react/client.js",
+      "require": "./dist/frameworks/react/client.js"
+    },
+    "./vue": {
+      "types": "./dist/frameworks/vue/client.d.ts",
+      "import": "./dist/frameworks/vue/client.js",
+      "require": "./dist/frameworks/vue/client.js"
+    },
+    "./svelte": {
+      "types": "./dist/frameworks/svelte/client.d.ts",
+      "import": "./dist/frameworks/svelte/client.js",
+      "require": "./dist/frameworks/svelte/client.js"
+    },
+    "./helpers": {
+      "types": "./dist/helpers.d.ts",
+      "import": "./dist/helpers.js",
+      "require": "./dist/helpers.js"
+    },
+    "./global": {
+      "types": "./dist/global/global.d.ts",
+      "import": "./dist/global/global.d.ts"
+    },
+    "./eslint": {
+      "types": "./dist/eslint/index.d.ts",
+      "import": "./dist/eslint/index.js",
+      "require": "./dist/eslint/index.js"
+    },
+    "./rpc": {
+      "types": "./dist/rpc/annotations.d.ts",
+      "import": "./dist/rpc/annotations.js",
+      "require": "./dist/rpc/annotations.js"
+    },
+    "./database": {
+      "types": "./dist/database/index.d.ts",
+      "import": "./dist/database/index.js",
+      "require": "./dist/database/index.js"
+    }
+  },
+  "peerDependenciesMeta": {
+    "express": {
+      "optional": true
+    },
+    "fastify": {
+      "optional": true
+    },
+    "vue": {
+      "optional": true
+    },
+    "react": {
+      "optional": true
+    },
+    "react-dom": {
+      "optional": true
+    },
+    "mysql2": {
+      "optional": true
+    },
+    "pg": {
+      "optional": true
+    },
+    "@libsql/client": {
+      "optional": true
+    },
+    "svelte": {
+      "optional": true
+    }
+  },
+  "peerDependencies": {
+    "@libsql/client": "^0.17.0",
+    "express": "^4.0.0",
+    "fastify": "^5.6.1",
+    "mysql2": "^3.17.4",
+    "pg": "^8.18.0",
+    "react": "^19.2.3",
+    "react-dom": "^19.2.3",
+    "svelte": "^5.56.3",
+    "vue": "^3.5.27"
+  },
+  "dependencies": {
+    "@vue/server-renderer": "^3.5.34",
+    "chokidar": "^3.6.0",
+    "commander": "^14.0.3",
+    "cpx2": "^9.0.0",
+    "esbuild": "^0.27.7",
+    "esbuild-plugin-vue3": "^0.5.1",
+    "esbuild-svelte": "^0.9.5",
+    "koffi": "^2.16.2",
+    "sharp": "^0.34.5",
+    "ts-loader": "9.5.4",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.3",
+    "ws": "^8.20.0"
+  },
+  "optionalDependencies": {
+    "@fastify/cookie": "^11.0.2",
+    "@fastify/formbody": "^8.0.2",
+    "cookie-parser": "^1.4.7"
+  },
+  "devDependencies": {
+    "@libsql/client": "^0.17.3",
+    "@types/express": "^4.17.25",
+    "@types/pg": "^8.20.0",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@types/ws": "^8.18.1",
+    "@vue/tsconfig": "^0.8.1",
+    "image-size": "^2.0.2",
+    "mysql2": "^3.22.3",
+    "pg": "^8.20.0",
+    "vue": "^3.5.34",
+    "vue-tsc": "^3.2.8"
+  }
+}

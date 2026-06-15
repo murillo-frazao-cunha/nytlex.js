@@ -1,0 +1,8 @@
+{
+  "files": [],
+  "references": [
+    { "path": "packages/nytlex"},
+    { "path": "packages/auth" },
+    { "path": "packages/@nytlex-create"}
+  ]
+}

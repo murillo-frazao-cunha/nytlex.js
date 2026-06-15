@@ -1,0 +1,40 @@
+{
+  "name": "@nytlex/create",
+  "version": "1.2.2",
+  "description": "CLI tool to create a new Nytlex.js application",
+  "main": "dist/index.js",
+  "bin": {
+    "@nytlex/create": "dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "ts-node src/index.ts",
+    "version:major": "pnpm version major --no-git-tag-version",
+    "version:minor": "pnpm version minor --no-git-tag-version",
+    "version:patch": "pnpm version patch --no-git-tag-version"
+  },
+  "keywords": [
+    "nytlex",
+    "nytlex",
+    "framework",
+    "web",
+    "typescript",
+    "react"
+  ],
+  "files": [
+    "dist"
+  ],
+  "author": "mfraz",
+  "license": "Apache-2.0",
+  "packageManager": "pnpm@10.28.1+sha512.7d7dbbca9e99447b7c3bf7a73286afaaf6be99251eb9498baefa7d406892f67b879adb3a1d7e687fc4ccc1a388c7175fbaae567a26ab44d1067b54fcb0d6a316",
+  "devDependencies": {
+    "@types/node": "^20.11.24",
+    "typescript": "^5.9.3"
+  },
+  "dependencies": {
+    "commander": "^14.0.2",
+    "nytlex": "workspace:*",
+    "ts-node": "^10.9.2"
+  }
+}

@@ -1,0 +1,36 @@
+{
+  "name": "nytlex-framework",
+  "version": "2.3.0-canary.1",
+  "description": "Monorepo for the Nytlex.js framework",
+  "private": true,
+  "author": "mfraz",
+  "license": "Apache-2.0",
+  "packageManager": "pnpm@10.20.0",
+  "keywords": [
+    "nytlex.js",
+    "nytlex",
+    "framework",
+    "monorepo"
+  ],
+  "scripts": {
+    "build": "pnpm run clean && pnpm -r --filter \"!./services/**\" --filter \"!./examples/**\" run build",
+    "clean": "pnpm -r exec node -e \"const fs = require('fs'); fs.rmSync('dist', { recursive: true, force: true })\"",
+    "release": "node scripts/release.js",
+    "publish:create-app": "pnpm run build && pnpm publish --filter @nytlex/create --no-git-checks --access=public",
+    "publish:create-app-canary": "pnpm run build && pnpm publish --filter @nytlex/create --no-git-checks --access=public --tag=canary"
+  },
+  "devDependencies": {
+    "@changesets/cli": "^2.31.0",
+    "@types/node": "^20.19.43",
+    "@vue/tsconfig": "^0.8.1",
+    "typescript": "^5.9.3",
+    "vue-tsc": "^3.3.4"
+  },
+  "overrides": {
+    "node-gyp": "^10.2.0"
+  },
+  "workspaces": [
+    "packages/*",
+    "examples/*"
+  ]
+}
