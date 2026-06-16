@@ -93,21 +93,34 @@ watch(hmrTimestamp, async (timestamp) => {
 const CurrentPageComponent = shallowRef(null);
 const params = ref({});
 
-const updateRoute = () => {
+const updateRoute = async () => {
   const currentPath = window.location.pathname.replace("index.html", '');
   currentPathKey.value = currentPath;
 
   const match = findRouteForPath(currentPath, props.routes);
   if (match) {
-    CurrentPageComponent.value = props.componentMap[match.componentPath];
+    const component = props.componentMap[match.componentPath];
+    CurrentPageComponent.value = component;
     params.value = match.params;
-    updateDocumentTitle(match.metadata?.title);
+
+    // 1. Pega o metadata estático inicial como fallback
+    let pageTitle = match.metadata?.title;
+
+    // 2. Se o componente atual tiver um generateMetadata, executa ele com os novos params
+    if (component && typeof component.generateMetadata === 'function') {
+      const dynamicMeta = await component.generateMetadata(params.value);
+      if (dynamicMeta && dynamicMeta.title) {
+        pageTitle = dynamicMeta.title;
+      }
+    }
+
+    // 3. Atualiza o título real da página
+    updateDocumentTitle(pageTitle);
   } else {
     CurrentPageComponent.value = null;
     params.value = {};
   }
 };
-
 // --- Computed ---
 const resolvedContent = computed(() => {
   if (!CurrentPageComponent.value) {

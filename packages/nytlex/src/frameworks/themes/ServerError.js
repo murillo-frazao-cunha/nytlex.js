@@ -394,7 +394,7 @@ function getServerErrorHtml(options = {}) {
             </div>
 
             <a href="https://npmjs.com/package/nytlex" target="_blank" rel="noopener noreferrer" class="brand-link">
-                <img src="https://raw.githubusercontent.com/murillo-frazao-cunha/nytlex-docs/master/public/logo.png" alt="Nytlex Logo" style="width: 20px; height: 20px;" />
+                <img src="https://raw.githubusercontent.com/murillo-frazao-cunha/nytlex-docs/master/public/favicon-dark.svg" alt="Nytlex Logo" style="width: 20px; height: 20px;" />
                 <span style="font-size: 13px; font-weight: 600; letter-spacing: 0.02em;">Nytlex.js</span>
             </a>
         </div>

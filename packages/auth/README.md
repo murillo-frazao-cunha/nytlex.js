@@ -1,8 +1,19 @@
 <div align="center">  
-  <picture>  
-      <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/murillo-frazao-cunha/nytlex-docs/master/public/logo.png">  
-      <img alt="nytlex.js logo" src="https://raw.githubusercontent.com/murillo-frazao-cunha/nytlex-docs/master/public/logo.png" width="128">  
-    </picture>  
+<picture>
+  <source
+    media="(prefers-color-scheme: dark)"
+    srcset="https://raw.githubusercontent.com/murillo-frazao-cunha/nytlex-docs/master/public/favicon-dark.svg"
+  >
+  <source
+    media="(prefers-color-scheme: light)"
+    srcset="https://raw.githubusercontent.com/murillo-frazao-cunha/nytlex-docs/master/public/favicon.svg"
+  >
+  <img
+    alt="Nytlex.js logo"
+    src="https://raw.githubusercontent.com/murillo-frazao-cunha/nytlex-docs/master/public/favicon.svg"
+    width="128"
+  >
+</picture>
   <h1>@nytlex/auth</h1>  
 
 [![NPM](https://img.shields.io/npm/v/@nytlex/auth.svg?style=for-the-badge&labelColor=000000)](https://www.npmjs.com/package/@nytlex/auth)  

@@ -311,7 +311,7 @@ function getDefaultNotFound() {
             </div>
             
             <a href="https://npmjs.com/package/nytlex" target="_blank" rel="noopener noreferrer" class="brand-link">
-                <img src="https://raw.githubusercontent.com/murillo-frazao-cunha/nytlex-docs/master/public/logo.png" alt="Nytlex Logo" style="width: 24px; height: 24px;" />
+                <img src="https://raw.githubusercontent.com/murillo-frazao-cunha/nytlex-docs/master/public/favicon-dark.svg" alt="Nytlex Logo" style="width: 24px; height: 24px;" />
                 <span style="font-size: 14px; font-weight: 600; letter-spacing: 0.02em;">Nytlex.js</span>
             </a>
         </div>

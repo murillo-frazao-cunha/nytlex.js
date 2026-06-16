@@ -1,8 +1,19 @@
 <div align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/murillo-frazao-cunha/nytlex-docs/master/public/logo.png">
-    <img alt="Nytlex.js logo" src="https://raw.githubusercontent.com/murillo-frazao-cunha/nytlex-docs/master/public/logo.png" width="128">
-  </picture>
+<picture>
+  <source
+    media="(prefers-color-scheme: dark)"
+    srcset="https://raw.githubusercontent.com/murillo-frazao-cunha/nytlex-docs/master/public/favicon-dark.svg"
+  >
+  <source
+    media="(prefers-color-scheme: light)"
+    srcset="https://raw.githubusercontent.com/murillo-frazao-cunha/nytlex-docs/master/public/favicon.svg"
+  >
+  <img
+    alt="Nytlex.js logo"
+    src="https://raw.githubusercontent.com/murillo-frazao-cunha/nytlex-docs/master/public/favicon.svg"
+    width="128"
+  >
+</picture>
 
 # Nytlex.js
 
