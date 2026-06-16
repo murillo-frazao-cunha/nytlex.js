@@ -140,7 +140,7 @@ interface RenderOptions {
     allRoutes: (RouteConfig & { componentPath: string })[];
 }
 
-export async function renderSvelte({ req, res, route, params, allRoutes }: RenderOptions): Promise<void | string> {
+export async function renderSvelte({ req, res, route, params, allRoutes }: RenderOptions): Promise<void> {
     polyfillBrowserEnv();
     const { generateMetadata } = route;
     const isProduction = !(req as any).hwebDev;
@@ -156,9 +156,6 @@ export async function renderSvelte({ req, res, route, params, allRoutes }: Rende
         // 1. Loading Screen (Vanilla)
         if (!assets || assets.scripts.length === 0) {
             const loadingHtml = getBuildingScreenHtml();
-            if (process.env.NYTLEX_MODE === 'export') {
-                return loadingHtml;
-            }
             res.setHeader('Content-Type', 'text/html; charset=utf-8');
             res.end(loadingHtml);
             return;
@@ -199,29 +196,31 @@ export async function renderSvelte({ req, res, route, params, allRoutes }: Rende
         let svelteHeadHtml = '';
         let svelteCssHtml = '';
 
-        // Se houver um erro aqui dentro, ele irá direto para o catch (err) externo, igual no Vue!
-        if (PageComponent) {
-            const { render } = require('svelte/server');
+        // Ignora a renderização SSR caso esteja no modo export.
+        if (process.env.NYTLEX_MODE !== 'export') {
+            if (PageComponent) {
+                const { render } = require('svelte/server');
 
-            if (LayoutComponent) {
-                const result = render(LayoutComponent, {
-                    props: {
-                        params,
-                        children: ($$payload: any) => {
-                            PageComponent($$payload, { params });
+                if (LayoutComponent) {
+                    const result = render(LayoutComponent, {
+                        props: {
+                            params,
+                            children: ($$payload: any) => {
+                                PageComponent($$payload, { params });
+                            }
                         }
-                    }
-                });
+                    });
 
-                bodyInnerHtml = result.body || result.html || '';
-                svelteHeadHtml = result.head || '';
+                    bodyInnerHtml = result.body || result.html || '';
+                    svelteHeadHtml = result.head || '';
+                } else {
+                    const result = render(PageComponent, { props: { params } });
+                    bodyInnerHtml = result.body || result.html || '';
+                    svelteHeadHtml = result.head || '';
+                }
             } else {
-                const result = render(PageComponent, { props: { params } });
-                bodyInnerHtml = result.body || result.html || '';
-                svelteHeadHtml = result.head || '';
+                bodyInnerHtml = '<div>Page not found</div>';
             }
-        } else {
-            bodyInnerHtml = '<div>Page not found</div>';
         }
 
         const finalHtml = buildSvelteShellDocument({
@@ -239,10 +238,6 @@ export async function renderSvelte({ req, res, route, params, allRoutes }: Rende
             bodyInnerHtml,
         });
 
-        if (process.env.NYTLEX_MODE === 'export') {
-            return finalHtml;
-        }
-
         res.statusCode = 200;
         res.setHeader('Content-Type', 'text/html; charset=utf-8');
         res.end(finalHtml);
@@ -250,7 +245,7 @@ export async function renderSvelte({ req, res, route, params, allRoutes }: Rende
     } catch (err) {
         if (!isProduction) console.error("Critical Svelte SSR Render Error:", err);
 
-        // Fallback para o ServerError Vanilla (exatamente igual aos outros frameworks)
+        // Fallback para o ServerError Vanilla
         let errorHtml = getServerErrorHtml({
             error: err,
             title: 'Critical SSR Render Error',
@@ -259,10 +254,6 @@ export async function renderSvelte({ req, res, route, params, allRoutes }: Rende
 
         if (!isProduction && hotReloadManager) {
             errorHtml = errorHtml.replace('</body>', `<div style="display:none">${hotReloadManager.getClientScript()}</div></body>`);
-        }
-
-        if (process.env.NYTLEX_MODE === 'export') {
-            return errorHtml;
         }
 
         res.statusCode = 500;

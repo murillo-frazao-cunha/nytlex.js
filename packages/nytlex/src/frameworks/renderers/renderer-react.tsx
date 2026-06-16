@@ -76,7 +76,7 @@ async function sendReactSsrFallback(options: {
     metaTagsHtml: string;
     stylesHtml: string;
     hotReloadScript: string;
-}): Promise<void | string> {
+}): Promise<void> {
     const {
         req,
         res,
@@ -93,32 +93,6 @@ async function sendReactSsrFallback(options: {
     const scriptsHtml = assets.scripts
         .map((src) => `<script type="module" src="${src}"></script>`)
         .join('\n');
-
-    if (process.env.NYTLEX_MODE === 'export') {
-        if (isProduction) {
-            return buildShellHtml({
-                lang,
-                title,
-                metaTagsHtml,
-                stylesHtml,
-                hotReloadScript: '',
-                scriptsHtml,
-            });
-        }
-
-        const err = toError(error);
-        let errorHtml = getServerErrorHtml({
-            title: title || 'SSR Error',
-            error: err,
-            requestUrl: getRequestUrl(req),
-            hint: "SSR failed to render this route. See the error below."
-        });
-
-        if (hotReloadScript) {
-            errorHtml = errorHtml.replace('</body>', `<div style="display:none">${hotReloadScript}</div></body>`);
-        }
-        return errorHtml;
-    }
 
     if (res.headersSent) {
         try {
@@ -215,7 +189,7 @@ interface RenderOptions {
     allRoutes: (RouteConfig & { componentPath: string })[];
 }
 
-export async function render({ req, res, route, params, allRoutes }: RenderOptions): Promise<void | string> {
+export async function render({ req, res, route, params, allRoutes }: RenderOptions): Promise<void> {
     polyfillBrowserEnv();
 
     const { generateMetadata } = route;
@@ -232,9 +206,6 @@ export async function render({ req, res, route, params, allRoutes }: RenderOptio
         // 1. Verificar Build - Envia a página pura em Vanilla JS se não terminou de compilar
         if (!assets || assets.scripts.length === 0) {
             const html = getBuildingScreenHtml();
-            if (process.env.NYTLEX_MODE === 'export') {
-                return html;
-            }
             res.setHeader('Content-Type', 'text/html; charset=utf-8');
             res.end(html);
             return;
@@ -296,6 +267,25 @@ export async function render({ req, res, route, params, allRoutes }: RenderOptio
             return `<link rel="stylesheet" href="${finalUrl}">`;
         }).join('\n');
 
+        // Ignora a renderização SSR caso esteja no modo export.
+        // O React fará o render inteiro no lado do cliente (Client-Side Rendering)
+        if (process.env.NYTLEX_MODE === 'export') {
+            const scriptsHtml = assets.scripts.map(src => `<script type="module" src="${src}"></script>`).join('\n');
+            const finalHtml = buildShellHtml({
+                lang: htmlLang,
+                title: metadata.title || 'Nytlex.js',
+                metaTagsHtml,
+                stylesHtml,
+                hotReloadScript,
+                scriptsHtml
+            });
+
+            res.statusCode = 200;
+            res.setHeader('Content-Type', 'text/html; charset=utf-8');
+            res.end(finalHtml);
+            return;
+        }
+
         // 5. Componente da Página Atual
         const PageComponent = route.component;
 
@@ -340,19 +330,6 @@ export async function render({ req, res, route, params, allRoutes }: RenderOptio
                             return;
                         }
 
-                        if (process.env.NYTLEX_MODE === 'export') {
-                            let html = '';
-                            const writable = new Writable({
-                                write(chunk, _encoding, callback) {
-                                    html += chunk.toString();
-                                    callback();
-                                }
-                            });
-                            writable.on('finish', () => resolve(html));
-                            stream.pipe(writable);
-                            return;
-                        }
-
                         res.setHeader('Content-Type', 'text/html; charset=utf-8');
                         stream.pipe(res);
                         resolve();
@@ -374,10 +351,6 @@ export async function render({ req, res, route, params, allRoutes }: RenderOptio
     } catch (err) {
         if (!assets) {
             const errorHtml = isProduction ? '' : getServerErrorHtml({ error: err, title: 'Critical SSR Error' });
-
-            if (process.env.NYTLEX_MODE === 'export') {
-                return errorHtml;
-            }
 
             if (!res.headersSent) {
                 res.statusCode = 500;

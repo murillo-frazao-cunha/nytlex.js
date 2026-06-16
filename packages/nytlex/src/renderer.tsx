@@ -33,7 +33,7 @@ interface RenderOptions {
  * Renderiza a requisição como stream, carregando o driver apropriado dinamicamente.
  * Isso evita erros de "Module Not Found" quando um dos frameworks não está instalado.
  */
-export async function renderAsStream(params: RenderOptions): Promise<void | string> {
+export async function renderAsStream(params: RenderOptions): Promise<void> {
     if (cachedFramework === 'react') {
         // Import dinâmico garante que o código do React só seja avaliado se necessário
         const { render } = await import("./frameworks/renderers/renderer-react.js");

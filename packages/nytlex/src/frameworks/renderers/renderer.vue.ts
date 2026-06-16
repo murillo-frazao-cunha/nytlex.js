@@ -123,8 +123,7 @@ interface RenderOptions {
     allRoutes: (RouteConfig & { componentPath: string })[];
 }
 
-// Alterado o tipo de retorno para aceitar a string do HTML no modo de exportação
-export async function renderVue({ req, res, route, params, allRoutes }: RenderOptions): Promise<void | string> {
+export async function renderVue({ req, res, route, params, allRoutes }: RenderOptions): Promise<void> {
     polyfillBrowserEnv();
     const { createSSRApp, h } = vue;
     const { renderToString } = vueServerRenderer as any;
@@ -142,9 +141,6 @@ export async function renderVue({ req, res, route, params, allRoutes }: RenderOp
         // 1. Loading Screen (Vanilla)
         if (!assets || assets.scripts.length === 0) {
             const loadingHtml = getBuildingScreenHtml();
-            if (process.env.NYTLEX_MODE === 'export') {
-                return loadingHtml;
-            }
             res.setHeader('Content-Type', 'text/html; charset=utf-8');
             res.end(loadingHtml);
             return;
@@ -175,19 +171,25 @@ export async function renderVue({ req, res, route, params, allRoutes }: RenderOp
         const stylesHtml = assets.styles.map(s => `<link rel="stylesheet" href="${s}">`).join('\n');
         const scriptsHtml = assets.scripts.map(s => `<script type="module" src="${s}"></script>`).join('\n');
 
-        let PageComponent = ensureVueComponent(route.component, route.componentPath ? path.resolve(process.cwd(), route.componentPath) : '');
+        let bodyInnerHtml = '';
 
-        const RootComponent = {
-            setup() {
-                return () => {
-                    const pageNode = PageComponent ? h(PageComponent as any, { params }) : h('div', 'Page not found');
-                    return LayoutComponent ? h(LayoutComponent, null, { default: () => pageNode }) : pageNode;
-                };
-            }
-        };
+        // Ignora a renderização SSR caso esteja no modo export.
+        // O Vue será montado inteiramente no lado do cliente (Client-Side Rendering)
+        if (process.env.NYTLEX_MODE !== 'export') {
+            let PageComponent = ensureVueComponent(route.component, route.componentPath ? path.resolve(process.cwd(), route.componentPath) : '');
 
-        const app = createSSRApp(RootComponent);
-        const bodyInnerHtml = await renderToString(app);
+            const RootComponent = {
+                setup() {
+                    return () => {
+                        const pageNode = PageComponent ? h(PageComponent as any, { params }) : h('div', 'Page not found');
+                        return LayoutComponent ? h(LayoutComponent, null, { default: () => pageNode }) : pageNode;
+                    };
+                }
+            };
+
+            const app = createSSRApp(RootComponent);
+            bodyInnerHtml = await renderToString(app);
+        }
 
         const finalHtml = buildVueShellDocument({
             lang: htmlLang,
@@ -201,11 +203,6 @@ export async function renderVue({ req, res, route, params, allRoutes }: RenderOp
             hotReloadScript,
             bodyInnerHtml,
         });
-
-        // Intercepta e retorna apenas o HTML se estiver exportando
-        if (process.env.NYTLEX_MODE === 'export') {
-            return finalHtml;
-        }
 
         res.statusCode = 200;
         res.setHeader('Content-Type', 'text/html; charset=utf-8');
@@ -223,11 +220,6 @@ export async function renderVue({ req, res, route, params, allRoutes }: RenderOp
 
         if (!isProduction && hotReloadManager) {
             errorHtml = errorHtml.replace('</body>', `<div style="display:none">${hotReloadManager.getClientScript()}</div></body>`);
-        }
-
-        // Intercepta e retorna o erro se estiver exportando
-        if (process.env.NYTLEX_MODE === 'export') {
-            return errorHtml;
         }
 
         res.statusCode = 500;
