@@ -140,7 +140,7 @@ interface RenderOptions {
     allRoutes: (RouteConfig & { componentPath: string })[];
 }
 
-export async function renderSvelte({ req, res, route, params, allRoutes }: RenderOptions): Promise<void> {
+export async function renderSvelte({ req, res, route, params, allRoutes }: RenderOptions): Promise<void | string> {
     polyfillBrowserEnv();
     const { generateMetadata } = route;
     const isProduction = !(req as any).hwebDev;
@@ -155,8 +155,12 @@ export async function renderSvelte({ req, res, route, params, allRoutes }: Rende
 
         // 1. Loading Screen (Vanilla)
         if (!assets || assets.scripts.length === 0) {
+            const loadingHtml = getBuildingScreenHtml();
+            if (process.env.NYTLEX_MODE === 'export') {
+                return loadingHtml;
+            }
             res.setHeader('Content-Type', 'text/html; charset=utf-8');
-            res.end(getBuildingScreenHtml());
+            res.end(loadingHtml);
             return;
         }
 
@@ -220,9 +224,7 @@ export async function renderSvelte({ req, res, route, params, allRoutes }: Rende
             bodyInnerHtml = '<div>Page not found</div>';
         }
 
-        res.statusCode = 200;
-        res.setHeader('Content-Type', 'text/html; charset=utf-8');
-        res.end(buildSvelteShellDocument({
+        const finalHtml = buildSvelteShellDocument({
             lang: htmlLang,
             title: metadata.title || 'Nytlex.js',
             metaTagsHtml,
@@ -235,14 +237,20 @@ export async function renderSvelte({ req, res, route, params, allRoutes }: Rende
             scriptsHtml,
             hotReloadScript,
             bodyInnerHtml,
-        }));
+        });
+
+        if (process.env.NYTLEX_MODE === 'export') {
+            return finalHtml;
+        }
+
+        res.statusCode = 200;
+        res.setHeader('Content-Type', 'text/html; charset=utf-8');
+        res.end(finalHtml);
 
     } catch (err) {
         if (!isProduction) console.error("Critical Svelte SSR Render Error:", err);
 
         // Fallback para o ServerError Vanilla (exatamente igual aos outros frameworks)
-        res.statusCode = 500;
-        res.setHeader('Content-Type', 'text/html; charset=utf-8');
         let errorHtml = getServerErrorHtml({
             error: err,
             title: 'Critical SSR Render Error',
@@ -252,6 +260,13 @@ export async function renderSvelte({ req, res, route, params, allRoutes }: Rende
         if (!isProduction && hotReloadManager) {
             errorHtml = errorHtml.replace('</body>', `<div style="display:none">${hotReloadManager.getClientScript()}</div></body>`);
         }
+
+        if (process.env.NYTLEX_MODE === 'export') {
+            return errorHtml;
+        }
+
+        res.statusCode = 500;
+        res.setHeader('Content-Type', 'text/html; charset=utf-8');
         res.end(errorHtml);
     }
 }

@@ -123,7 +123,8 @@ interface RenderOptions {
     allRoutes: (RouteConfig & { componentPath: string })[];
 }
 
-export async function renderVue({ req, res, route, params, allRoutes }: RenderOptions): Promise<void> {
+// Alterado o tipo de retorno para aceitar a string do HTML no modo de exportação
+export async function renderVue({ req, res, route, params, allRoutes }: RenderOptions): Promise<void | string> {
     polyfillBrowserEnv();
     const { createSSRApp, h } = vue;
     const { renderToString } = vueServerRenderer as any;
@@ -140,8 +141,12 @@ export async function renderVue({ req, res, route, params, allRoutes }: RenderOp
 
         // 1. Loading Screen (Vanilla)
         if (!assets || assets.scripts.length === 0) {
+            const loadingHtml = getBuildingScreenHtml();
+            if (process.env.NYTLEX_MODE === 'export') {
+                return loadingHtml;
+            }
             res.setHeader('Content-Type', 'text/html; charset=utf-8');
-            res.end(getBuildingScreenHtml());
+            res.end(loadingHtml);
             return;
         }
 
@@ -184,9 +189,7 @@ export async function renderVue({ req, res, route, params, allRoutes }: RenderOp
         const app = createSSRApp(RootComponent);
         const bodyInnerHtml = await renderToString(app);
 
-        res.statusCode = 200;
-        res.setHeader('Content-Type', 'text/html; charset=utf-8');
-        res.end(buildVueShellDocument({
+        const finalHtml = buildVueShellDocument({
             lang: htmlLang,
             title: metadata.title || 'Nytlex.js',
             metaTagsHtml,
@@ -197,14 +200,21 @@ export async function renderVue({ req, res, route, params, allRoutes }: RenderOp
             scriptsHtml,
             hotReloadScript,
             bodyInnerHtml,
-        }));
+        });
+
+        // Intercepta e retorna apenas o HTML se estiver exportando
+        if (process.env.NYTLEX_MODE === 'export') {
+            return finalHtml;
+        }
+
+        res.statusCode = 200;
+        res.setHeader('Content-Type', 'text/html; charset=utf-8');
+        res.end(finalHtml);
 
     } catch (err) {
         if (!isProduction) console.error("Critical Vue Render Error:", err);
 
         // Fallback para o ServerError Vanilla
-        res.statusCode = 500;
-        res.setHeader('Content-Type', 'text/html; charset=utf-8');
         let errorHtml = getServerErrorHtml({
             error: err,
             title: 'Critical SSR Render Error',
@@ -214,6 +224,14 @@ export async function renderVue({ req, res, route, params, allRoutes }: RenderOp
         if (!isProduction && hotReloadManager) {
             errorHtml = errorHtml.replace('</body>', `<div style="display:none">${hotReloadManager.getClientScript()}</div></body>`);
         }
+
+        // Intercepta e retorna o erro se estiver exportando
+        if (process.env.NYTLEX_MODE === 'export') {
+            return errorHtml;
+        }
+
+        res.statusCode = 500;
+        res.setHeader('Content-Type', 'text/html; charset=utf-8');
         res.end(errorHtml);
     }
 }
