@@ -33,7 +33,7 @@ import {
     extractComponentPreloads,
     BuildAssets,
 } from '../../renderers/common.ts';
-
+polyfillBrowserEnv();
 // Importa os geradores de HTML Vanilla
 import { getBuildingScreenHtml } from '../themes/BuildingPage';
 import { getServerErrorHtml } from '../themes/ServerError';
@@ -190,7 +190,7 @@ interface RenderOptions {
 }
 
 export async function render({ req, res, route, params, allRoutes }: RenderOptions): Promise<void> {
-    polyfillBrowserEnv();
+
 
     const { generateMetadata } = route;
     const isProduction = !(req as any).hwebDev;

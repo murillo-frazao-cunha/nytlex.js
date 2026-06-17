@@ -35,7 +35,7 @@ import * as vueServerRenderer from "@vue/server-renderer";
 // Importa os geradores de HTML Vanilla
 import { getBuildingScreenHtml } from '../themes/BuildingPage';
 import { getServerErrorHtml } from '../themes/ServerError';
-
+polyfillBrowserEnv();
 function buildVueShellDocument(options: {
     lang: string;
     title: string;
@@ -124,7 +124,7 @@ interface RenderOptions {
 }
 
 export async function renderVue({ req, res, route, params, allRoutes }: RenderOptions): Promise<void> {
-    polyfillBrowserEnv();
+
     const { createSSRApp, h } = vue;
     const { renderToString } = vueServerRenderer as any;
     const { generateMetadata } = route;

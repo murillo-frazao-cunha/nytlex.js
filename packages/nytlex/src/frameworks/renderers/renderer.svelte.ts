@@ -33,7 +33,7 @@ import {
 // Importa os geradores de HTML Vanilla
 import { getBuildingScreenHtml } from '../themes/BuildingPage';
 import { getServerErrorHtml } from '../themes/ServerError';
-
+polyfillBrowserEnv();
 function buildSvelteShellDocument(options: {
     lang: string;
     title: string;
