@@ -133,31 +133,43 @@ export function createBrowserEnvironmentPolyfill(): any {
  * Safely handles Node.js read-only properties
  */
 export function polyfillBrowserEnv(): void {
-    if (typeof window === 'undefined') {
-        const win = createBrowserEnvironmentPolyfill();
-        const globalAny = global as any;
+    const win = createBrowserEnvironmentPolyfill();
+    const globalAny = global as any;
 
-        // Helper to safely set globals
-        // Node 21+ has read-only globals like 'navigator', 'performance' etc
-        const setGlobal = (key: string, value: any) => {
-            try {
-                if (typeof globalAny[key] === 'undefined') {
-                    globalAny[key] = value;
-                }
-            } catch (e) {
-                // If it fails (read-only property), silently ignore
+    // Helper to safely set globals
+    // Node 21+ has read-only globals like 'navigator', 'performance' etc
+    const setGlobal = (key: string, value: any) => {
+        try {
+            if (typeof globalAny[key] === 'undefined' || globalAny[key] === null) {
+                globalAny[key] = value;
+            } else if ((key === 'localStorage' || key === 'sessionStorage') && typeof globalAny[key].getItem !== 'function') {
+                // Force polyfill if the object exists but is incomplete (e.g. an empty object {})
+                globalAny[key] = value;
             }
-        };
+        } catch (e) {
+            // If it fails (read-only property), silently ignore
+        }
+    };
 
+    // Ensure properties exist even if window is partially defined by another library
+    if (typeof globalAny.window === 'undefined') {
         setGlobal('window', win);
-        setGlobal('document', win.document);
-        setGlobal('navigator', win.navigator);
-        setGlobal('location', win.location);
-        setGlobal('localStorage', win.localStorage);
-        setGlobal('sessionStorage', win.sessionStorage);
-        setGlobal('requestAnimationFrame', win.requestAnimationFrame);
-        setGlobal('cancelAnimationFrame', win.cancelAnimationFrame);
+    } else {
+        if (!globalAny.window.localStorage || typeof globalAny.window.localStorage.getItem !== 'function') {
+            try { globalAny.window.localStorage = win.localStorage; } catch (e) {}
+        }
+        if (!globalAny.window.sessionStorage || typeof globalAny.window.sessionStorage.getItem !== 'function') {
+            try { globalAny.window.sessionStorage = win.sessionStorage; } catch (e) {}
+        }
     }
+
+    setGlobal('document', win.document);
+    setGlobal('navigator', win.navigator);
+    setGlobal('location', win.location);
+    setGlobal('localStorage', win.localStorage);
+    setGlobal('sessionStorage', win.sessionStorage);
+    setGlobal('requestAnimationFrame', win.requestAnimationFrame);
+    setGlobal('cancelAnimationFrame', win.cancelAnimationFrame);
 }
 
 // --- Module Loading Utilities ---
@@ -425,5 +437,3 @@ export function extractComponentPreloads(componentPath: string): string[] {
         return [];
     }
 }
-
-
