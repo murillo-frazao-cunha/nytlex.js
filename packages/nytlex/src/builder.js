@@ -150,17 +150,18 @@ const virtualEntryPlugin = (options) => ({
                 return normalized;
             };
 
-            const imports = routes
-                .map((route, index) => `import route${index} from '${formatPath(route.componentPath)}';`)
-                .join('\n');
-
+            // IMPORTANTE: O Layout e o NotFound continuam sendo carregados imediatamente (não são async)
+            // pois normalmente precisam renderizar logo no "first paint" da aplicação.
             const layoutImport = layout ? `import LayoutComponent from '${formatPath(layout.componentPath)}';` : '';
             const notFoundImport = notFound ? `import NotFoundComponent from '${formatPath(notFound.componentPath)}';` : '';
 
             const defaultNotFoundPath = path.join(__dirname, 'frameworks', 'themes', 'DefaultNotFound.js').replace(/\\/g, '/');
 
+            // OTIMIZAÇÃO DE PERFORMANCE (LAZY LOADING):
+            // Em vez de importar todas as rotas estaticamente no topo (o que enchia o network),
+            // agora passamos uma função de import dinâmico. O esbuild vai separar as rotas em chunks menores.
             let componentRegistration = routes
-                .map((route, index) => `  '${formatPath(route.componentPath)}': (route${index} && route${index}.default) ? route${index}.default : route${index},`)
+                .map((route, index) => `  '${formatPath(route.componentPath)}': () => import('${formatPath(route.componentPath)}'),`)
                 .join('\n');
 
             const layoutRegistration = layout ? `window.__NYTLEX_LAYOUT__ = LayoutComponent.default || LayoutComponent;` : `window.__NYTLEX_LAYOUT__ = null;`;
@@ -176,7 +177,6 @@ const virtualEntryPlugin = (options) => ({
             const entryClientPath = path.join(__dirname, 'frameworks', framework, 'entry.client.js').replace(/\\/g, '/');
 
             const code = `
-${imports}
 ${layoutImport}
 ${notFoundImport}
 import DefaultNotFound from '${defaultNotFoundPath}';
