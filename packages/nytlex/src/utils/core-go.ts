@@ -78,17 +78,61 @@ export class CoreGoManager {
   }
 
   /**
-   * Compara duas versões semânticas (ex: 1.1.0 > 1.0.0)
+   * Compara duas versões semânticas (ex: 1.1.0 > 1.0.0 ou 0.0.3-canary.0 > 0.0.1-canary.5)
    */
   private compareVersions(v1: string, v2: string): number {
-    const p1 = v1.split(".").map(Number);
-    const p2 = v2.split(".").map(Number);
+    const [main1, ...pre1Arr] = v1.split("-");
+    const [main2, ...pre2Arr] = v2.split("-");
+
+    const pre1 = pre1Arr.join("-");
+    const pre2 = pre2Arr.join("-");
+
+    const p1 = main1.split(".").map(Number);
+    const p2 = main2.split(".").map(Number);
+
+    // Compara a parte principal "x.y.z"
     for (let i = 0; i < Math.max(p1.length, p2.length); i++) {
       const n1 = p1[i] || 0;
       const n2 = p2[i] || 0;
       if (n1 > n2) return 1;
       if (n1 < n2) return -1;
     }
+
+    // Se a versão principal for igual, avalia os sufixos (pre-release)
+    if (!pre1 && pre2) return 1;  // Versão estável ganha de pre-release
+    if (pre1 && !pre2) return -1;
+    if (!pre1 && !pre2) return 0; // Ambas são estáveis e iguais
+
+    // Se ambas têm sufixo, comparamos os sufixos
+    const preParts1 = pre1.split(".");
+    const preParts2 = pre2.split(".");
+
+    for (let i = 0; i < Math.max(preParts1.length, preParts2.length); i++) {
+      const part1 = preParts1[i];
+      const part2 = preParts2[i];
+
+      if (part1 === undefined) return -1;
+      if (part2 === undefined) return 1;
+
+      const num1 = parseInt(part1, 10);
+      const num2 = parseInt(part2, 10);
+
+      const isNum1 = !isNaN(num1);
+      const isNum2 = !isNaN(num2);
+
+      if (isNum1 && isNum2) {
+        if (num1 > num2) return 1;
+        if (num1 < num2) return -1;
+      } else if (isNum1 && !isNum2) {
+        return -1;
+      } else if (!isNum1 && isNum2) {
+        return 1;
+      } else {
+        if (part1 > part2) return 1;
+        if (part1 < part2) return -1;
+      }
+    }
+
     return 0;
   }
 
