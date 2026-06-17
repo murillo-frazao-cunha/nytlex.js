@@ -154,14 +154,34 @@ const virtualEntryPlugin = (options) => ({
             // pois normalmente precisam renderizar logo no "first paint" da aplicação.
             const layoutImport = layout ? `import LayoutComponent from '${formatPath(layout.componentPath)}';` : '';
             const notFoundImport = notFound ? `import NotFoundComponent from '${formatPath(notFound.componentPath)}';` : '';
-
             const defaultNotFoundPath = path.join(__dirname, 'frameworks', 'themes', 'DefaultNotFound.js').replace(/\\/g, '/');
 
+            // --- CORREÇÃO DO ERRO #482 DO REACT SEM MEXER NO FRONTEND DO USUÁRIO ---
+            const reactImport = framework === 'react' ? `import React, { useState, useEffect } from 'react';` : '';
+            const reactLazyWrapper = framework === 'react' ? `
+const __nytlexReactLazy = (importFunc) => {
+    return (props) => {
+        const [Comp, setComp] = useState(null);
+        useEffect(() => {
+            importFunc().then(m => {
+                setComp(() => m.default || Object.values(m)[0] || m);
+            }).catch(err => console.error('[Nytlex] Error loading chunk:', err));
+        }, []);
+        return Comp ? React.createElement(Comp, props) : null;
+    };
+};` : '';
+
             // OTIMIZAÇÃO DE PERFORMANCE (LAZY LOADING):
-            // Em vez de importar todas as rotas estaticamente no topo (o que enchia o network),
-            // agora passamos uma função de import dinâmico. O esbuild vai separar as rotas em chunks menores.
+            // Agora garantimos que o React não crashe usando o wrapper especial no build script.
             let componentRegistration = routes
-                .map((route, index) => `  '${formatPath(route.componentPath)}': () => import('${formatPath(route.componentPath)}'),`)
+                .map((route, index) => {
+                    const pathStr = formatPath(route.componentPath);
+                    if (framework === 'react') {
+                        return `  '${pathStr}': __nytlexReactLazy(() => import('${pathStr}')),`;
+                    }
+                    // Vue e Svelte normalmente lidam com a Promise diretamente de forma nativa pelos seus routers.
+                    return `  '${pathStr}': () => import('${pathStr}'),`;
+                })
                 .join('\n');
 
             const layoutRegistration = layout ? `window.__NYTLEX_LAYOUT__ = LayoutComponent.default || LayoutComponent;` : `window.__NYTLEX_LAYOUT__ = null;`;
@@ -177,6 +197,9 @@ const virtualEntryPlugin = (options) => ({
             const entryClientPath = path.join(__dirname, 'frameworks', framework, 'entry.client.js').replace(/\\/g, '/');
 
             const code = `
+${reactImport}
+${reactLazyWrapper}
+
 ${layoutImport}
 ${notFoundImport}
 import DefaultNotFound from '${defaultNotFoundPath}';
@@ -455,7 +478,10 @@ async function watchWithChunks(nytlexOptions, outdir, hotReloadManager = null) {
         const config = await getFrameworkConfig(nytlexOptions, outdir, false, true);
         let buildSeq = 0;
 
-        config.sourcemap = 'inline';
+        // RESOLVENDO O PROBLEMA DOS SOURCEMAPS
+        // 'inline' atrapalha as DevTools do Chrome a mapear chunks dinâmicos corretamente.
+        // True gera arquivos .map que o Chrome usa para mostrar os erros no .tsx, .vue e .svelte originais.
+        config.sourcemap = true;
 
         config.plugins.push({
             name: 'watch-notifier',
