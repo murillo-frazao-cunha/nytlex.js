@@ -136,22 +136,17 @@ export function polyfillBrowserEnv(): void {
     const win = createBrowserEnvironmentPolyfill();
     const globalAny = global as any;
 
-    // Helper to safely set globals
-    // Node 21+ has read-only globals like 'navigator', 'performance' etc
     const setGlobal = (key: string, value: any) => {
         try {
             if (typeof globalAny[key] === 'undefined' || globalAny[key] === null) {
                 globalAny[key] = value;
             } else if ((key === 'localStorage' || key === 'sessionStorage') && typeof globalAny[key].getItem !== 'function') {
-                // Force polyfill if the object exists but is incomplete (e.g. an empty object {})
                 globalAny[key] = value;
             }
         } catch (e) {
-            // If it fails (read-only property), silently ignore
         }
     };
 
-    // Ensure properties exist even if window is partially defined by another library
     if (typeof globalAny.window === 'undefined') {
         setGlobal('window', win);
     } else {
@@ -303,7 +298,6 @@ export function generateMetaTags(metadata: Metadata): string {
         }
     }
 
-
     return tags.join('\n');
 }
 
@@ -324,23 +318,30 @@ export function getBuildAssets(): BuildAssets | null {
     const projectDir = process.cwd();
     const distDir = path.join(projectDir, '.nytlex');
     const assetsDir = path.join(distDir, 'assets');
-    const chunksDir = path.join(distDir, 'chunks');
     if (!fs.existsSync(distDir)) return null;
 
     const scripts: string[] = [];
     const styles: string[] = [];
 
     // Helper to process directories
-    const processDirectory = (directory: string, urlPrefix: string) => {
+    const processDirectory = (directory: string, urlPrefix: string, isRoot = false) => {
         if (!fs.existsSync(directory)) return;
 
         const files = fs.readdirSync(directory);
         files.forEach(file => {
             if (file.endsWith('.map')) return; // Skip sourcemaps
 
+            // ⚠️ OTIMIZAÇÃO CRÍTICA AQUI ⚠️
+            // Se estivermos varrendo a pasta principal (root), ignoramos as "pages" e outros scripts.
+            // Apenas o main e o layout devem ser enviados como <script> na carga inicial.
+            if (isRoot) {
+                if (!file.startsWith('main-') && !file.startsWith('layout-') && !file.startsWith('main.') && !file.startsWith('layout.')) {
+                    return; // Ignora chunks e pages
+                }
+            }
+
             const url = `${urlPrefix}/${file.replace(".br", '').replace(".gz", '')}`;
 
-            // Support .js, .js.br, .js.gz
             if (file.endsWith('.js') || file.endsWith('.js.br') || file.endsWith('.js.gz')) {
                 scripts.push(url);
             } else if (file.endsWith('.css')) {
@@ -349,14 +350,14 @@ export function getBuildAssets(): BuildAssets | null {
         });
     };
 
-    // Read assets from .nytlex/
-    processDirectory(distDir, '/_nytlex');
+    // Lê apenas os arquivos essenciais (main, layout) do diretório base
+    processDirectory(distDir, '/_nytlex', true);
 
-    // Read assets from .nytlex/assets
-    processDirectory(assetsDir, '/_nytlex/assets');
+    // Lê os estilos ou scripts globais da pasta assets
+    processDirectory(assetsDir, '/_nytlex/assets', false);
 
-    // Read chunks from .nytlex/chunks
-    processDirectory(chunksDir, '/_nytlex/chunks');
+    // IMPORTANTE: A chamada para varrer a pasta de chunks (chunksDir) foi REMOVIDA.
+    // Os chunks agora serão puxados nativamente pelo navegador apenas quando o import() dinâmico pedir.
 
     return { scripts, styles };
 }

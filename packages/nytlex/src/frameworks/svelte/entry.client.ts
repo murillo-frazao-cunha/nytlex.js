@@ -79,7 +79,7 @@ function updateOverlaysState() {
 }
 
 // --- Lógica de Roteamento e Renderização (Svelte) ---
-function renderRoute(routes: any[], componentMap: Record<string, any>) {
+async function renderRoute(routes: any[], componentMap: Record<string, any>) {
     const currentPath = window.location.pathname.replace("index.html", '');
     const match = findRouteForPath(currentPath, routes);
 
@@ -113,7 +113,12 @@ function renderRoute(routes: any[], componentMap: Record<string, any>) {
         return;
     }
 
-    const PageComponent = componentMap[match.componentPath];
+    let PageComponent = componentMap[match.componentPath];
+
+    if (typeof PageComponent === 'function' && !PageComponent.prototype) {
+        const lazyModule = await PageComponent();
+        PageComponent = lazyModule.default || lazyModule;
+    }
     const LayoutComponent = window.__NYTLEX_LAYOUT__;
 
     updateDocumentTitle(match.metadata?.title);
@@ -214,7 +219,7 @@ function mountSvelteComponent(PageComponent: any, params: any, LayoutComponent: 
 }
 
 // --- Inicialização do Cliente ---
-function initializeClient() {
+async function initializeClient() {
     try {
         const routes = window.__NYTLEX_ROUTES__ || [];
         const componentMap = window.__NYTLEX_COMPONENTS__ || {};
@@ -239,9 +244,9 @@ function initializeClient() {
         );
 
         let pendingHmr: { file: string | null; timestamp: number } | null = null;
-        setupHMREvents((file, timestamp) => {
+        setupHMREvents(async (file, timestamp) => {
             pendingHmr = { file, timestamp };
-            renderRoute(routes, componentMap);
+            await renderRoute(routes, componentMap);
             dispatchHmrReady(pendingHmr);
             pendingHmr = null;
         });
@@ -250,7 +255,7 @@ function initializeClient() {
         window.addEventListener('popstate', handleRouteUpdate);
         router.subscribe(handleRouteUpdate);
 
-        renderRoute(routes, componentMap);
+        await renderRoute(routes, componentMap);
 
     } catch (error: any) {
         renderCriticalError(error, 'Svelte');

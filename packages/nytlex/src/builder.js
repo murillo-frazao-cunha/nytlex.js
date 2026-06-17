@@ -150,16 +150,16 @@ const virtualEntryPlugin = (options) => ({
                 return normalized;
             };
 
-            // IMPORTANTE: O Layout e o NotFound continuam sendo carregados imediatamente (não são async)
-            // pois normalmente precisam renderizar logo no "first paint" da aplicação.
             const layoutImport = layout ? `import LayoutComponent from '${formatPath(layout.componentPath)}';` : '';
             const notFoundImport = notFound ? `import NotFoundComponent from '${formatPath(notFound.componentPath)}';` : '';
             const defaultNotFoundPath = path.join(__dirname, 'frameworks', 'themes', 'DefaultNotFound.js').replace(/\\/g, '/');
 
-            // --- CORREÇÃO DO ERRO #482 DO REACT SEM MEXER NO FRONTEND DO USUÁRIO ---
+            // Importações nativas de otimização de Lazy Load por framework
             const reactImport = framework === 'react' ? `import React, { useState, useEffect } from 'react';` : '';
-            const reactLazyWrapper = framework === 'react' ? `
-const __nytlexReactLazy = (importFunc) => {
+            const vueImport = framework === 'vue' ? `import { defineAsyncComponent } from 'vue';` : '';
+
+            const wrapperFunction = framework === 'react' ? `
+const __nytlexLazy = (importFunc) => {
     return (props) => {
         const [Comp, setComp] = useState(null);
         useEffect(() => {
@@ -169,18 +169,17 @@ const __nytlexReactLazy = (importFunc) => {
         }, []);
         return Comp ? React.createElement(Comp, props) : null;
     };
-};` : '';
+};` : framework === 'vue' ? `
+const __nytlexLazy = (importFunc) => defineAsyncComponent(importFunc);
+` : `
+const __nytlexLazy = (importFunc) => importFunc;
+`;
 
-            // OTIMIZAÇÃO DE PERFORMANCE (LAZY LOADING):
-            // Agora garantimos que o React não crashe usando o wrapper especial no build script.
+            // Envolvendo os imports na respectiva abstração de cada framework
             let componentRegistration = routes
                 .map((route, index) => {
                     const pathStr = formatPath(route.componentPath);
-                    if (framework === 'react') {
-                        return `  '${pathStr}': __nytlexReactLazy(() => import('${pathStr}')),`;
-                    }
-                    // Vue e Svelte normalmente lidam com a Promise diretamente de forma nativa pelos seus routers.
-                    return `  '${pathStr}': () => import('${pathStr}'),`;
+                    return `  '${pathStr}': __nytlexLazy(() => import('${pathStr}')),`;
                 })
                 .join('\n');
 
@@ -198,7 +197,8 @@ const __nytlexReactLazy = (importFunc) => {
 
             const code = `
 ${reactImport}
-${reactLazyWrapper}
+${vueImport}
+${wrapperFunction}
 
 ${layoutImport}
 ${notFoundImport}
@@ -394,20 +394,11 @@ async function getFrameworkConfig(nytlexOptions, outdir, isProduction, isWatch =
     }
 
     // --- INÍCIO DA IMPLEMENTAÇÃO DE CHUNKS E OTIMIZAÇÃO MÁXIMA ---
+    // MANTENHA APENAS A ENTRADA MAIN.
+    // O erro do carregamento em massa acontecia pois todas as rotas eram declaradas
+    // como "EntryPoints" manuais, forçando a tag <script> nelas na página.
+    // O Esbuild faz code-splitting automático com base nos dynamic imports!
     const entryPoints = { 'main': entryPoint };
-
-    if (nytlexOptions.layout) {
-        entryPoints['pages/layout'] = nytlexOptions.layout.componentPath;
-    }
-    if (nytlexOptions.notFound) {
-        entryPoints['pages/not-found'] = nytlexOptions.notFound.componentPath;
-    }
-    if (nytlexOptions.routes && Array.isArray(nytlexOptions.routes)) {
-        nytlexOptions.routes.forEach((route, index) => {
-            const fileName = path.basename(route.componentPath, path.extname(route.componentPath));
-            entryPoints[`pages/${fileName}-${index}`] = route.componentPath;
-        });
-    }
 
     config.entryPoints = entryPoints;
     config.format = 'esm';
