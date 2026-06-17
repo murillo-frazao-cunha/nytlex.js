@@ -71,6 +71,9 @@ const requireContextPlugin = () => ({
                     let files;
                     try { files = fs.readdirSync(dir); } catch (e) { return filelist; }
                     files.forEach(function (file) {
+                        // OTIMIZAÇÃO DE MEMÓRIA: Evitar varredura em diretórios pesados e desnecessários
+                        if (file === 'node_modules' || file === '.git' || file === '.nytlex') return;
+
                         const filepath = path.join(dir, file);
                         const stat = fs.statSync(filepath);
                         if (stat.isDirectory()) {
@@ -245,10 +248,11 @@ const smartSvgPlugin = () => ({
 const customPostCssPlugin = () => ({
     name: 'postcss-injector',
     setup(build) {
-        let postcss, tailwindcss, autoprefixer;
+        let postcss, tailwindcss, autoprefixer, postcssLoadConfig;
         try {
             postcss = require('postcss');
             autoprefixer = require('autoprefixer');
+            try { postcssLoadConfig = require('postcss-load-config'); } catch(e) {}
             try {
                 tailwindcss = require('@tailwindcss/postcss');
             } catch (e) {
@@ -257,27 +261,52 @@ const customPostCssPlugin = () => ({
         } catch (e) {
         }
 
+        // OTIMIZAÇÃO DE MEMÓRIA: Carrega as configs UMA ÚNICA VEZ.
+        let processor = null;
+        let initialized = false;
+
+        const initProcessor = async () => {
+            if (initialized || !postcss) return;
+            initialized = true;
+
+            try {
+                // 1. Tenta carregar o arquivo postcss.config.js se o pacote existir
+                if (postcssLoadConfig) {
+                    const { plugins } = await postcssLoadConfig();
+                    processor = postcss(plugins);
+                    return;
+                }
+            } catch (err) {
+                // Se falhar (ex: não tem arquivo de config), cai no fallback abaixo
+            }
+
+            // 2. Fallback: Configura e lê o tailwind.config.js manualmente
+            if (tailwindcss) {
+                const tailwindConfigPath = path.join(process.cwd(), 'tailwind.config.js');
+                const hasTailwindConfig = fs.existsSync(tailwindConfigPath);
+                const plugins = hasTailwindConfig
+                    ? [tailwindcss(tailwindConfigPath), autoprefixer && autoprefixer()].filter(Boolean)
+                    : [tailwindcss(), autoprefixer && autoprefixer()].filter(Boolean);
+                processor = postcss(plugins);
+            }
+        };
+
         build.onLoad({ filter: /\.css$/ }, async args => {
             if (!fs.existsSync(args.path)) return null;
 
+            await initProcessor();
+
             let cssContent = await fs.promises.readFile(args.path, 'utf8');
 
-            if (postcss && tailwindcss) {
+            if (processor) {
                 try {
-                    const tailwindConfigPath = path.join(process.cwd(), 'tailwind.config.js');
-                    const hasTailwindConfig = fs.existsSync(tailwindConfigPath);
-
-                    const plugins = hasTailwindConfig
-                        ? [tailwindcss(tailwindConfigPath), autoprefixer()]
-                        : [tailwindcss(), autoprefixer()];
-
-                    const result = await postcss(plugins).process(cssContent, {
+                    const result = await processor.process(cssContent, {
                         from: args.path,
                         to: args.path
                     });
                     cssContent = result.css;
                 } catch (err) {
-                    Console.warn("Erro ao compilar Tailwind:", err.message);
+                    Console.warn("Erro ao compilar Tailwind/PostCSS:", err.message);
                 }
             }
 
