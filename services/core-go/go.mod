@@ -5,7 +5,7 @@ go 1.25.6
 require (
 	github.com/andybalholm/brotli v1.2.0
 	github.com/evanw/esbuild v0.27.2
-	github.com/quic-go/quic-go v0.59.0
+	github.com/quic-go/quic-go v0.59.1
 	golang.org/x/term v0.39.0
 )
 
