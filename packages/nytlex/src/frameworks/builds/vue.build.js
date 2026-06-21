@@ -22,14 +22,26 @@ const Console = require("../../api/console").default;
 async function createVueConfig(entryPoint, outdir, isProduction, { prePlugins = [], postPlugins = [], isWatch = false } = {}) {
     let vuePlugin;
     const mode = process.env.NYTLEX_MODE || 'build'
+
+    // --- CORREÇÃO: Avisando o compilador sobre as tags customizadas ---
+    const vueCompilerOptions = {
+        isCustomElement: (tag) => tag.startsWith('nytlex-')
+    };
+
     // Suporte ao Vue no Esbuild. Necessário esbuild-plugin-vue3
     try {
         const vue = require('unplugin-vue/esbuild');
-        vuePlugin = vue();
+        vuePlugin = vue({
+            template: {
+                compilerOptions: vueCompilerOptions
+            }
+        });
     } catch (e) {
         try {
             const vue3 = require('esbuild-plugin-vue3');
-            vuePlugin = vue3();
+            vuePlugin = vue3({
+                compilerOptions: vueCompilerOptions
+            });
         } catch (err) {
             Console.warn("Para buildar Vue nativamente com alta velocidade instale o plugin do esbuild:\n  npm install -D esbuild-plugin-vue3\n");
         }

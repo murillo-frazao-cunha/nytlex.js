@@ -93,6 +93,9 @@ watch(hmrTimestamp, async (timestamp) => {
 const CurrentPageComponent = shallowRef(null);
 const params = ref({});
 
+// NOVO: Estado para segurar a metadata atual
+const currentMetadata = ref(null);
+
 const updateRoute = async () => {
   const currentPath = window.location.pathname.replace("index.html", '');
   currentPathKey.value = currentPath;
@@ -103,24 +106,31 @@ const updateRoute = async () => {
     CurrentPageComponent.value = component;
     params.value = match.params;
 
-    // 1. Pega o metadata estático inicial como fallback
-    let pageTitle = match.metadata?.title;
-
-    // 2. Se o componente atual tiver um generateMetadata, executa ele com os novos params
+    // Resolve a metadata
+    let meta = match.metadata || {};
     if (component && typeof component.generateMetadata === 'function') {
       const dynamicMeta = await component.generateMetadata(params.value);
-      if (dynamicMeta && dynamicMeta.title) {
-        pageTitle = dynamicMeta.title;
+      if (dynamicMeta) {
+        meta = { ...meta, ...dynamicMeta };
       }
     }
 
-    // 3. Atualiza o título real da página
-    updateDocumentTitle(pageTitle);
+    // Seta o estado e deixa o watch cuidar do side-effect
+    currentMetadata.value = meta;
   } else {
     CurrentPageComponent.value = null;
     params.value = {};
+    currentMetadata.value = null;
   }
 };
+
+// NOVO: Watcher pra atualizar o título de forma isolada
+watch(currentMetadata, (newMeta) => {
+  if (newMeta && newMeta.title) {
+    updateDocumentTitle(newMeta.title);
+  }
+}, { deep: true });
+
 // --- Computed ---
 const resolvedContent = computed(() => {
   if (!CurrentPageComponent.value) {

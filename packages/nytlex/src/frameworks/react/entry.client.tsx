@@ -1,5 +1,5 @@
 /*
- * This file is part of the Nytlex.js Project.
+ * This file is part of the Vatts.js / Nytlex.js Project.
  * Copyright (c) 2026 mfraz
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -53,7 +53,7 @@ function App({ componentMap, routes, initialComponentPath, initialParams, layout
 
     const [buildError, setBuildError] = useState<NytlexBuildError | null>(() => {
         const initialError = (window as any).__NYTLEX_BUILD_ERROR__ || null;
-        if (initialError) console.warn('[Nytlex] ⚠️ Erro de build inicial detectado:', initialError);
+        if (initialError) console.warn('[Vatts] ⚠️ Erro de build inicial detectado:', initialError);
         return initialError;
     });
     const [isErrorOpen, setIsErrorOpen] = useState<boolean>(() => !!(window as any).__NYTLEX_BUILD_ERROR__);
@@ -135,20 +135,36 @@ function App({ componentMap, routes, initialComponentPath, initialParams, layout
         return match ? match.params : {};
     });
 
+    // NOVO: Estado específico para guardar os metadados da rota atual
+    const [currentMetadata, setCurrentMetadata] = useState<Metadata | null>(() => {
+        const currentPath = window.location.pathname.replace("index.html", '');
+        const match = getMatch(currentPath);
+        return match ? match.metadata : null;
+    });
+
     const updateRoute = useCallback(() => {
-        const currentPath = router.pathname.replace("index.html", '');
+        // Removido router.pathname das dependências pra evitar stale closure
+        const currentPath = window.location.pathname.replace("index.html", '');
         const match = getMatch(currentPath);
 
         if (match) {
             setCurrentPageComponent(() => componentMap[match.componentPath]);
             setParams(match.params);
-            updateDocumentTitle(match.metadata?.title);
+            setCurrentMetadata(match.metadata || null);
         } else {
-            console.warn(`[Nytlex] ⚠️ Rota não encontrada (404): ${currentPath}`);
+            console.warn(`[Vatts] ⚠️ Rota não encontrada (404): ${currentPath}`);
             setCurrentPageComponent(null);
             setParams({});
+            setCurrentMetadata(null);
         }
-    }, [router.pathname, getMatch, componentMap]);
+    }, [getMatch, componentMap]);
+
+    // NOVO: Effect isolado pra atualizar o título assim que a metadata mudar
+    useEffect(() => {
+        if (currentMetadata && currentMetadata.title) {
+            updateDocumentTitle(currentMetadata.title);
+        }
+    }, [currentMetadata]);
 
     useEffect(() => {
         const handlePopState = () => updateRoute();
@@ -197,8 +213,6 @@ function App({ componentMap, routes, initialComponentPath, initialParams, layout
 // --- Inicialização do Cliente ---
 function initializeClient() {
     try {
-        // Resolve a rota e params inicial calculando diretamente no lado do cliente
-        // a partir da injeção do esbuild!
         const routes = (window as any).__NYTLEX_ROUTES__ || [];
         const currentPath = window.location.pathname.replace("index.html", '');
         const match = findRouteForPath(currentPath, routes);
@@ -210,19 +224,19 @@ function initializeClient() {
         if ((window as any).__NYTLEX_COMPONENTS__) {
             Object.assign(componentMap, (window as any).__NYTLEX_COMPONENTS__);
         } else {
-            console.warn('[Nytlex] ⚠️ No components found in window.__NYTLEX_COMPONENTS__');
+            console.warn('[Vatts] ⚠️ No components found in window.__NYTLEX_COMPONENTS__');
         }
 
         const container = document.getElementById('root');
         if (!container) throw new Error('Container #root not found.');
 
         if (window.__NYTLEX_ROOT__) {
-            console.log('[Nytlex] ♻️ HMR detectado: Limpando a root do React...');
+            console.log('[Vatts] ♻️ HMR detectado: Limpando a root do React...');
             try {
                 window.__NYTLEX_ROOT__.unmount();
                 container.innerHTML = '';
             } catch (e) {
-                console.warn('[Nytlex] ⚠️ Warning during unmount:', e);
+                console.warn('[Vatts] ⚠️ Warning during unmount:', e);
             }
         }
 

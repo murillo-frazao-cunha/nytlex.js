@@ -115,13 +115,45 @@ async function renderRoute(routes: any[], componentMap: Record<string, any>) {
 
     let PageComponent = componentMap[match.componentPath];
 
+    // ANOTAÇÃO 1: Resolve o componente de forma assíncrona (se for lazy load)
+    // Precisamos disso resolvido ANTES de checar a metadata dinâmica.
     if (typeof PageComponent === 'function' && !PageComponent.prototype) {
         const lazyModule = await PageComponent();
         PageComponent = lazyModule.default || lazyModule;
+
+        // ANOTAÇÃO 2: Se o lazyModule exportar a função de metadata, anexamos no componente
+        // pra manter a compatibilidade com a chamada abaixo.
+        if (lazyModule.generateMetadata) {
+            PageComponent.generateMetadata = lazyModule.generateMetadata;
+        }
     }
+
     const LayoutComponent = window.__NYTLEX_LAYOUT__;
 
-    updateDocumentTitle(match.metadata?.title);
+    // ==========================================
+    // ANOTAÇÃO 3: O GRANDE FIX DO TITLE ESTÁ AQUI
+    // ==========================================
+
+    // Pega o título estático injetado nas rotas pelo servidor como fallback
+    let pageTitle = match.metadata?.title;
+
+    // Se o componente Svelte exportou uma função 'generateMetadata',
+    // chama ela passando os params atuais (pra rotas tipo /user/:id)
+    if (PageComponent && typeof PageComponent.generateMetadata === 'function') {
+        try {
+            const dynamicMeta = await PageComponent.generateMetadata(match.params);
+            if (dynamicMeta && dynamicMeta.title) {
+                pageTitle = dynamicMeta.title;
+            }
+        } catch (err) {
+            console.warn('[Nytlex] Erro ao gerar metadata dinâmica no Svelte:', err);
+        }
+    }
+
+    // Agora sim, com o título resolvido (estático ou dinâmico), a gente atualiza a aba!
+    updateDocumentTitle(pageTitle);
+
+    // ==========================================
 
     if (PageComponent) {
         mountSvelteComponent(PageComponent, match.params, LayoutComponent, container);
