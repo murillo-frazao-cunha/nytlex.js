@@ -94,11 +94,13 @@ const CurrentPageComponent = shallowRef(null);
 const params = ref({});
 
 // NOVO: Estado para segurar a metadata atual
-const currentMetadata = ref(null);
+const currentMetadata = ref({});
 
 const updateRoute = async () => {
   const currentPath = window.location.pathname.replace("index.html", '');
   currentPathKey.value = currentPath;
+
+  console.log(`[Vatts.js Metadata] 🔄 Atualizando rota para: ${currentPath}`);
 
   const match = findRouteForPath(currentPath, props.routes);
   if (match) {
@@ -106,18 +108,49 @@ const updateRoute = async () => {
     CurrentPageComponent.value = component;
     params.value = match.params;
 
-    // Resolve a metadata
-    let meta = match.metadata || {};
-    if (component && typeof component.generateMetadata === 'function') {
-      const dynamicMeta = await component.generateMetadata(params.value);
-      if (dynamicMeta) {
-        meta = { ...meta, ...dynamicMeta };
+    console.log('[Vatts.js Metadata] ✅ Componente encontrado:', match.componentPath);
+
+    try {
+      // 1. Resolve Metadata do Layout (Base)
+      let layoutMeta = {};
+      if (props.layoutComponent) {
+        layoutMeta = props.layoutComponent.metadata || {};
+        if (typeof props.layoutComponent.generateMetadata === 'function') {
+          console.log('[Vatts.js Metadata] ⏳ Executando generateMetadata do Layout...');
+          const dynamicLayoutMeta = await props.layoutComponent.generateMetadata(params.value);
+          layoutMeta = { ...layoutMeta, ...dynamicLayoutMeta };
+        }
       }
+      console.log('[Vatts.js Metadata] 📦 Layout Meta resolvido:', layoutMeta);
+
+      // 2. Resolve Metadata da Página (Específico)
+      let pageMeta = match.metadata || (component && component.metadata) || {};
+      if (component && typeof component.generateMetadata === 'function') {
+        console.log('[Vatts.js Metadata] ⏳ Executando generateMetadata da Página...');
+        const dynamicPageMeta = await component.generateMetadata(params.value);
+        if (dynamicPageMeta) {
+          pageMeta = { ...pageMeta, ...dynamicPageMeta };
+        }
+      }
+      console.log('[Vatts.js Metadata] 📄 Page Meta resolvido:', pageMeta);
+
+      // 3. Unifica as Metadatas (Prioridade para a Página)
+      const unifiedMeta = {
+        ...layoutMeta,
+        ...pageMeta
+      };
+
+      console.log('[Vatts.js Metadata] 🔗 Metadata Unificada Final:', unifiedMeta);
+
+      // Força a atualização do ref
+      currentMetadata.value = unifiedMeta;
+
+    } catch (error) {
+      console.error('[Vatts.js Metadata] ❌ Erro ao resolver metadata (Verifique suas funções generateMetadata):', error);
     }
 
-    // Seta o estado e deixa o watch cuidar do side-effect
-    currentMetadata.value = meta;
   } else {
+    console.warn(`[Vatts.js Metadata] ⚠️ Nenhuma rota encontrada para: ${currentPath}`);
     CurrentPageComponent.value = null;
     params.value = {};
     currentMetadata.value = null;
@@ -126,8 +159,12 @@ const updateRoute = async () => {
 
 // NOVO: Watcher pra atualizar o título de forma isolada
 watch(currentMetadata, (newMeta) => {
+  console.log('[Vatts.js Metadata] 👀 Watcher acionado com:', newMeta);
   if (newMeta && newMeta.title) {
+    console.log(`[Vatts.js Metadata] ✏️ Atualizando document.title para: "${newMeta.title}"`);
     updateDocumentTitle(newMeta.title);
+  } else {
+    console.log('[Vatts.js Metadata] ℹ️ Nenhum título encontrado na metadata unificada.');
   }
 }, { deep: true });
 
@@ -137,7 +174,7 @@ const resolvedContent = computed(() => {
     const NotFoundComponent = window.__NYTLEX_NOT_FOUND__;
     if (NotFoundComponent) return NotFoundComponent;
 
-    const { getDefaultNotFound } = window.__NYTLEX_DEFAULT_NOT_FOUND__;
+    const { getDefaultNotFound } = window.__NYTLEX_DEFAULT_NOT_FOUND__ || {};
     return getDefaultNotFound
         ? defineComponent({
           render() {
