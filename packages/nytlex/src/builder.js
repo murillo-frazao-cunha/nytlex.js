@@ -116,6 +116,9 @@ const requireContextPlugin = () => ({
     }
 });
 
+const path = require('path');
+const fs = require('fs');
+
 // --- Virtual Entry Plugin (Adapted for Esbuild) ---
 const virtualEntryPlugin = (options) => ({
     name: 'nytlex-virtual-entry',
@@ -141,7 +144,6 @@ const virtualEntryPlugin = (options) => ({
             const notFound = options.notFound;
             const framework = options.framework;
 
-            // Função para garantir que caminhos relativos comecem com ./
             const formatPath = (p) => {
                 const normalized = p.replace(/\\/g, '/');
                 if (!normalized.startsWith('./') && !normalized.startsWith('../') && !path.isAbsolute(normalized)) {
@@ -150,14 +152,15 @@ const virtualEntryPlugin = (options) => ({
                 return normalized;
             };
 
-            const layoutImport = layout ? `import LayoutComponent from '${formatPath(layout.componentPath)}';` : '';
-            const notFoundImport = notFound ? `import NotFoundComponent from '${formatPath(notFound.componentPath)}';` : '';
+            // MUDANÇA 1: Importamos usando * as Module para não perder os exports nomeados (metadata/generateMetadata)
+            const layoutImport = layout ? `import * as LayoutModule from '${formatPath(layout.componentPath)}';` : '';
+            const notFoundImport = notFound ? `import * as NotFoundModule from '${formatPath(notFound.componentPath)}';` : '';
             const defaultNotFoundPath = path.join(__dirname, 'frameworks', 'themes', 'DefaultNotFound.js').replace(/\\/g, '/');
 
-            // Importações nativas de otimização de Lazy Load por framework
             const reactImport = framework === 'react' ? `import React, { useState, useEffect } from 'react';` : '';
             const vueImport = framework === 'vue' ? `import { defineAsyncComponent } from 'vue';` : '';
 
+            // Adaptamos o lazy para pegar apenas o default e prevenir erros de renderização
             const wrapperFunction = framework === 'react' ? `
 const __nytlexLazy = (importFunc) => {
     return (props) => {
@@ -165,28 +168,31 @@ const __nytlexLazy = (importFunc) => {
         useEffect(() => {
             importFunc().then(m => {
                 setComp(() => m.default || Object.values(m)[0] || m);
-            }).catch(err => console.error('[Nytlex] Error loading chunk:', err));
+            }).catch(err => console.error('[Vatts.js] Error loading chunk:', err));
         }, []);
         return Comp ? React.createElement(Comp, props) : null;
     };
 };` : framework === 'vue' ? `
-const __nytlexLazy = (importFunc) => defineAsyncComponent(importFunc);
+const __nytlexLazy = (importFunc) => defineAsyncComponent(() => importFunc().then(m => m.default || m));
 ` : `
 const __nytlexLazy = (importFunc) => importFunc;
 `;
 
-            // Envolvendo os imports na respectiva abstração de cada framework
+            // MUDANÇA 2: Agora o mapa guarda um objeto com a 'component' pro framework e o 'loader' pra puxar dados extras
             let componentRegistration = routes
-                .map((route, index) => {
+                .map((route) => {
                     const pathStr = formatPath(route.componentPath);
-                    return `  '${pathStr}': __nytlexLazy(() => import('${pathStr}')),`;
+                    return `  '${pathStr}': {
+    component: __nytlexLazy(() => import('${pathStr}')),
+    loader: () => import('${pathStr}')
+  },`;
                 })
                 .join('\n');
 
-            const layoutRegistration = layout ? `window.__NYTLEX_LAYOUT__ = LayoutComponent.default || LayoutComponent;` : `window.__NYTLEX_LAYOUT__ = null;`;
-            const notFoundRegistration = notFound ? `window.__NYTLEX_NOT_FOUND__ = NotFoundComponent.default || NotFoundComponent;` : `window.__NYTLEX_NOT_FOUND__ = null;`;
+            // MUDANÇA 3: O Layout guarda o módulo inteiro
+            const layoutRegistration = layout ? `window.__NYTLEX_LAYOUT__ = { component: LayoutModule.default || LayoutModule, module: LayoutModule };` : `window.__NYTLEX_LAYOUT__ = null;`;
+            const notFoundRegistration = notFound ? `window.__NYTLEX_NOT_FOUND__ = NotFoundModule.default || NotFoundModule;` : `window.__NYTLEX_NOT_FOUND__ = null;`;
 
-            // Mapeamos as rotas e injetamos globalmente na entry
             const clientRoutes = routes.map(r => ({
                 pattern: r.pattern,
                 componentPath: formatPath(r.componentPath),
@@ -221,6 +227,7 @@ import '${entryClientPath}';
         });
     }
 });
+
 
 // --- Plugins Adicionais: Node Stub e SVGs Especiais ---
 const nodeBuiltinStubPlugin = () => ({

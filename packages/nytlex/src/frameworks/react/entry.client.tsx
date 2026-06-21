@@ -1,5 +1,5 @@
 /*
- * This file is part of the Vatts.js / Nytlex.js Project.
+ * This file is part of the Vatts.js Project.
  * Copyright (c) 2026 mfraz
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -53,7 +53,7 @@ function App({ componentMap, routes, initialComponentPath, initialParams, layout
 
     const [buildError, setBuildError] = useState<NytlexBuildError | null>(() => {
         const initialError = (window as any).__NYTLEX_BUILD_ERROR__ || null;
-        if (initialError) console.warn('[Vatts] ⚠️ Erro de build inicial detectado:', initialError);
+        if (initialError) console.warn('[Vatts.js] ⚠️ Erro de build inicial detectado:', initialError);
         return initialError;
     });
     const [isErrorOpen, setIsErrorOpen] = useState<boolean>(() => !!(window as any).__NYTLEX_BUILD_ERROR__);
@@ -126,7 +126,9 @@ function App({ componentMap, routes, initialComponentPath, initialParams, layout
     const [CurrentPageComponent, setCurrentPageComponent] = useState(() => {
         const currentPath = window.location.pathname.replace("index.html", '');
         const match = getMatch(currentPath);
-        return match ? componentMap[match.componentPath] : null;
+        // Puxa o 'component' visual do novo objeto
+        const routeData = match ? componentMap[match.componentPath] : null;
+        return routeData ? routeData.component : null;
     });
 
     const [params, setParams] = useState(() => {
@@ -135,38 +137,75 @@ function App({ componentMap, routes, initialComponentPath, initialParams, layout
         return match ? match.params : {};
     });
 
-    // NOVO: Estado específico para guardar os metadados da rota atual
     const [currentMetadata, setCurrentMetadata] = useState<Metadata | null>(() => {
         const currentPath = window.location.pathname.replace("index.html", '');
         const match = getMatch(currentPath);
         return match ? match.metadata : null;
     });
 
-    const updateRoute = useCallback(() => {
-        // Removido router.pathname das dependências pra evitar stale closure
+    // MUDANÇA: transformado em async para dar await nos módulos e unificar as Metadatas
+    const updateRoute = useCallback(async () => {
         const currentPath = window.location.pathname.replace("index.html", '');
         const match = getMatch(currentPath);
 
         if (match) {
-            setCurrentPageComponent(() => componentMap[match.componentPath]);
+            const routeData = componentMap[match.componentPath];
+            setCurrentPageComponent(() => routeData ? routeData.component : null);
             setParams(match.params);
-            setCurrentMetadata(match.metadata || null);
+
+            try {
+                // 1. Resolve Metadata do Layout
+                let layoutMeta = {};
+                if (layoutComponent && layoutComponent.module) {
+                    const layoutModule = layoutComponent.module;
+                    layoutMeta = layoutModule.metadata || (layoutModule.default && layoutModule.default.metadata) || {};
+
+                    const generateMeta = layoutModule.generateMetadata || (layoutModule.default && layoutModule.default.generateMetadata);
+                    if (typeof generateMeta === 'function') {
+                        const dynamicLayoutMeta = await generateMeta(match.params);
+                        layoutMeta = { ...layoutMeta, ...dynamicLayoutMeta };
+                    }
+                }
+
+                // 2. Resolve Metadata da Página acessando o loader real
+                let pageMeta = match.metadata || {};
+                if (routeData && routeData.loader) {
+                    const pageModule = await routeData.loader();
+                    pageMeta = { ...pageMeta, ...(pageModule.metadata || (pageModule.default && pageModule.default.metadata) || {}) };
+
+                    const generateMeta = pageModule.generateMetadata || (pageModule.default && pageModule.default.generateMetadata);
+                    if (typeof generateMeta === 'function') {
+                        const dynamicPageMeta = await generateMeta(match.params);
+                        if (dynamicPageMeta) pageMeta = { ...pageMeta, ...dynamicPageMeta };
+                    }
+                }
+
+                // 3. Seta a união
+                setCurrentMetadata({ ...layoutMeta, ...pageMeta });
+
+            } catch (error) {
+                console.error('[Vatts.js Metadata] ❌ Erro ao resolver metadata do módulo em React:', error);
+            }
+
         } else {
-            console.warn(`[Vatts] ⚠️ Rota não encontrada (404): ${currentPath}`);
+            console.warn(`[Vatts.js] ⚠️ Rota não encontrada (404): ${currentPath}`);
             setCurrentPageComponent(null);
             setParams({});
             setCurrentMetadata(null);
         }
-    }, [getMatch, componentMap]);
+    }, [getMatch, componentMap, layoutComponent]);
 
-    // NOVO: Effect isolado pra atualizar o título assim que a metadata mudar
+    // Effect isolado pra atualizar o título
     useEffect(() => {
         if (currentMetadata && currentMetadata.title) {
             updateDocumentTitle(currentMetadata.title);
         }
     }, [currentMetadata]);
 
+    // Roda a extração assíncrona logo no mount também para pegar o título inicial corretamente
     useEffect(() => {
+        updateRoute();
+
         const handlePopState = () => updateRoute();
         window.addEventListener('popstate', handlePopState);
         const unsubscribe = router.subscribe(updateRoute);
@@ -178,24 +217,30 @@ function App({ componentMap, routes, initialComponentPath, initialParams, layout
     }, [updateRoute]);
 
     // Renderização
+    // Extrai o componente real do layout, já que agora ele é um objeto { component, module }
+    const LayoutComponentVisual = layoutComponent ? layoutComponent.component : null;
+
     let resolvedContent: React.ReactNode;
     if (!CurrentPageComponent || initialComponentPath === '__404__') {
-        const NotFoundComponent = (window as any).__NYTLEX_NOT_FOUND__;
+        const NotFoundData = (window as any).__NYTLEX_NOT_FOUND__;
         let NotFoundContent;
 
-        if (NotFoundComponent) {
-            NotFoundContent = <NotFoundComponent />;
+        if (NotFoundData) {
+            // Caso tenha componente de erro no mapa (seja default export ou obj literal)
+            const NotFoundComp = NotFoundData.default || NotFoundData;
+            NotFoundContent = <NotFoundComp />;
         } else {
             const { getDefaultNotFound } = (window as any).__NYTLEX_DEFAULT_NOT_FOUND__;
             NotFoundContent = <div dangerouslySetInnerHTML={{ __html: getDefaultNotFound() }} />;
         }
-        resolvedContent = typeof layoutComponent === "function"
-            ? React.createElement(layoutComponent, { children: NotFoundContent })
+
+        resolvedContent = typeof LayoutComponentVisual === "function" || typeof LayoutComponentVisual === "object"
+            ? React.createElement(LayoutComponentVisual, { children: NotFoundContent })
             : NotFoundContent;
     } else {
         const PageContent = <CurrentPageComponent key={`page-${hmrTimestamp}`} params={params} />;
-        resolvedContent = typeof layoutComponent === "function"
-            ? React.createElement(layoutComponent, { children: PageContent })
+        resolvedContent = typeof LayoutComponentVisual === "function" || typeof LayoutComponentVisual === "object"
+            ? React.createElement(LayoutComponentVisual, { children: PageContent })
             : <div>{PageContent}</div>;
     }
 
@@ -224,19 +269,19 @@ function initializeClient() {
         if ((window as any).__NYTLEX_COMPONENTS__) {
             Object.assign(componentMap, (window as any).__NYTLEX_COMPONENTS__);
         } else {
-            console.warn('[Vatts] ⚠️ No components found in window.__NYTLEX_COMPONENTS__');
+            console.warn('[Vatts.js] ⚠️ No components found in window.__NYTLEX_COMPONENTS__');
         }
 
         const container = document.getElementById('root');
         if (!container) throw new Error('Container #root not found.');
 
         if (window.__NYTLEX_ROOT__) {
-            console.log('[Vatts] ♻️ HMR detectado: Limpando a root do React...');
+            console.log('[Vatts.js] ♻️ HMR detectado: Limpando a root do React...');
             try {
                 window.__NYTLEX_ROOT__.unmount();
                 container.innerHTML = '';
             } catch (e) {
-                console.warn('[Vatts] ⚠️ Warning during unmount:', e);
+                console.warn('[Vatts.js] ⚠️ Warning during unmount:', e);
             }
         }
 

@@ -14,41 +14,10 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
 -->
-<template>
-  <component :is="resolvedLayout" v-if="resolvedLayout">
-    <component
-        :is="resolvedContent"
-        v-bind="contentProps"
-        :key="`page-${hmrTimestamp}-${currentPathKey}`"
-    />
-  </component>
-
-  <component
-      v-else
-      :is="resolvedContent"
-      v-bind="contentProps"
-      :key="`page-${hmrTimestamp}-${currentPathKey}`"
-  />
-
-  <nytlex-dev-badge
-      v-if="isDev"
-      :has-build-error="!!buildError"
-      @click-build-error="isErrorOpen = true"
-  ></nytlex-dev-badge>
-
-  <nytlex-error-modal
-      .error="buildError"
-      .isOpen="isErrorOpen"
-      @close-modal="isErrorOpen = false"
-      @copy-log="handleCopyLog"
-  ></nytlex-error-modal>
-</template>
-
 <script setup>
 import { ref, computed, onMounted, onUnmounted, shallowRef, watch, nextTick, defineComponent, h } from 'vue';
 import { router } from '../../client/clientRouter';
 
-// Importa a lógica centralizada
 import {
   findRouteForPath, updateDocumentTitle, copyBuildError,
   setupBuildErrorEvents, setupHMREvents, dispatchHmrReady
@@ -75,7 +44,6 @@ const buildError = ref(window.__NYTLEX_BUILD_ERROR__ || null);
 const isErrorOpen = ref(!!window.__NYTLEX_BUILD_ERROR__);
 const isDev = process.env.NODE_ENV !== 'production';
 
-// Cleanup references for events
 let cleanupErrorEvents;
 let cleanupHmrEvents;
 let unsubscribeRouter;
@@ -92,97 +60,82 @@ watch(hmrTimestamp, async (timestamp) => {
 // --- Roteamento ---
 const CurrentPageComponent = shallowRef(null);
 const params = ref({});
-
-// NOVO: Estado para segurar a metadata atual
 const currentMetadata = ref({});
 
 const updateRoute = async () => {
   const currentPath = window.location.pathname.replace("index.html", '');
   currentPathKey.value = currentPath;
 
-  console.log(`[Vatts.js Metadata] 🔄 Atualizando rota para: ${currentPath}`);
-
   const match = findRouteForPath(currentPath, props.routes);
   if (match) {
-    const component = props.componentMap[match.componentPath];
-    CurrentPageComponent.value = component;
+    // Agora o componente vem de 'routeData.component'
+    const routeData = props.componentMap[match.componentPath];
+    CurrentPageComponent.value = routeData ? routeData.component : null;
     params.value = match.params;
 
-    console.log('[Vatts.js Metadata] ✅ Componente encontrado:', match.componentPath);
-
     try {
-      // 1. Resolve Metadata do Layout (Base)
+      // 1. Resolve Metadata do Layout
       let layoutMeta = {};
-      if (props.layoutComponent) {
-        layoutMeta = props.layoutComponent.metadata || {};
-        if (typeof props.layoutComponent.generateMetadata === 'function') {
-          console.log('[Vatts.js Metadata] ⏳ Executando generateMetadata do Layout...');
-          const dynamicLayoutMeta = await props.layoutComponent.generateMetadata(params.value);
+      // Lemos do .module que injetamos via Esbuild
+      if (props.layoutComponent && props.layoutComponent.module) {
+        const layoutModule = props.layoutComponent.module;
+        layoutMeta = layoutModule.metadata || (layoutModule.default && layoutModule.default.metadata) || {};
+
+        if (typeof layoutModule.generateMetadata === 'function') {
+          const dynamicLayoutMeta = await layoutModule.generateMetadata(params.value);
+          layoutMeta = { ...layoutMeta, ...dynamicLayoutMeta };
+        } else if (layoutModule.default && typeof layoutModule.default.generateMetadata === 'function') {
+          const dynamicLayoutMeta = await layoutModule.default.generateMetadata(params.value);
           layoutMeta = { ...layoutMeta, ...dynamicLayoutMeta };
         }
       }
-      console.log('[Vatts.js Metadata] 📦 Layout Meta resolvido:', layoutMeta);
 
-      // 2. Resolve Metadata da Página (Específico)
-      let pageMeta = match.metadata || (component && component.metadata) || {};
-      if (component && typeof component.generateMetadata === 'function') {
-        console.log('[Vatts.js Metadata] ⏳ Executando generateMetadata da Página...');
-        const dynamicPageMeta = await component.generateMetadata(params.value);
-        if (dynamicPageMeta) {
-          pageMeta = { ...pageMeta, ...dynamicPageMeta };
+      // 2. Resolve Metadata da Página acessando o módulo real via routeData.loader()
+      let pageMeta = match.metadata || {};
+      if (routeData && routeData.loader) {
+        // Invoca o import dinâmico que não está enjaulado pelo defineAsyncComponent
+        const pageModule = await routeData.loader();
+
+        pageMeta = { ...pageMeta, ...(pageModule.metadata || (pageModule.default && pageModule.default.metadata) || {}) };
+
+        if (typeof pageModule.generateMetadata === 'function') {
+          const dynamicPageMeta = await pageModule.generateMetadata(params.value);
+          if (dynamicPageMeta) pageMeta = { ...pageMeta, ...dynamicPageMeta };
+        } else if (pageModule.default && typeof pageModule.default.generateMetadata === 'function') {
+          const dynamicPageMeta = await pageModule.default.generateMetadata(params.value);
+          if (dynamicPageMeta) pageMeta = { ...pageMeta, ...dynamicPageMeta };
         }
       }
-      console.log('[Vatts.js Metadata] 📄 Page Meta resolvido:', pageMeta);
 
-      // 3. Unifica as Metadatas (Prioridade para a Página)
-      const unifiedMeta = {
-        ...layoutMeta,
-        ...pageMeta
-      };
-
-      console.log('[Vatts.js Metadata] 🔗 Metadata Unificada Final:', unifiedMeta);
-
-      // Força a atualização do ref
-      currentMetadata.value = unifiedMeta;
+      // 3. Unifica e joga pro watcher
+      currentMetadata.value = { ...layoutMeta, ...pageMeta };
 
     } catch (error) {
-      console.error('[Vatts.js Metadata] ❌ Erro ao resolver metadata (Verifique suas funções generateMetadata):', error);
+      console.error('[Vatts.js Metadata] ❌ Erro ao resolver metadata real do módulo:', error);
     }
 
   } else {
-    console.warn(`[Vatts.js Metadata] ⚠️ Nenhuma rota encontrada para: ${currentPath}`);
     CurrentPageComponent.value = null;
     params.value = {};
     currentMetadata.value = null;
   }
 };
 
-// NOVO: Watcher pra atualizar o título de forma isolada
 watch(currentMetadata, (newMeta) => {
-  console.log('[Vatts.js Metadata] 👀 Watcher acionado com:', newMeta);
   if (newMeta && newMeta.title) {
-    console.log(`[Vatts.js Metadata] ✏️ Atualizando document.title para: "${newMeta.title}"`);
     updateDocumentTitle(newMeta.title);
-  } else {
-    console.log('[Vatts.js Metadata] ℹ️ Nenhum título encontrado na metadata unificada.');
   }
 }, { deep: true });
 
 // --- Computed ---
 const resolvedContent = computed(() => {
   if (!CurrentPageComponent.value) {
-    const NotFoundComponent = window.__NYTLEX_NOT_FOUND__;
-    if (NotFoundComponent) return NotFoundComponent;
+    const NotFoundData = window.__NYTLEX_NOT_FOUND__;
+    if (NotFoundData) return NotFoundData;
 
     const { getDefaultNotFound } = window.__NYTLEX_DEFAULT_NOT_FOUND__ || {};
     return getDefaultNotFound
-        ? defineComponent({
-          render() {
-            return h('div', {
-              innerHTML: getDefaultNotFound()
-            });
-          }
-        })
+        ? defineComponent({ render: () => h('div', { innerHTML: getDefaultNotFound() }) })
         : 'div';
   }
   return CurrentPageComponent.value;
@@ -193,13 +146,15 @@ const contentProps = computed(() => {
   return { params: params.value };
 });
 
-const resolvedLayout = computed(() => props.layoutComponent || null);
+const resolvedLayout = computed(() => {
+  // Ajuste pro template receber a parte certa do layout
+  return props.layoutComponent ? props.layoutComponent.component : null;
+});
 
 // --- Lifecycle ---
 onMounted(() => {
   updateRoute();
 
-  // Usa as funções de eventos do Core
   cleanupErrorEvents = setupBuildErrorEvents(
       (err) => { buildError.value = err; isErrorOpen.value = true; },
       () => { buildError.value = null; isErrorOpen.value = false; }
@@ -218,7 +173,6 @@ onMounted(() => {
 onUnmounted(() => {
   if (cleanupErrorEvents) cleanupErrorEvents();
   if (cleanupHmrEvents) cleanupHmrEvents();
-
   window.removeEventListener('popstate', updateRoute);
   if (unsubscribeRouter) unsubscribeRouter();
 });
