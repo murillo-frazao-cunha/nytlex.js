@@ -116,8 +116,6 @@ const requireContextPlugin = () => ({
     }
 });
 
-const path = require('path');
-const fs = require('fs');
 
 // --- Virtual Entry Plugin (Adapted for Esbuild) ---
 const virtualEntryPlugin = (options) => ({
