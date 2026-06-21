@@ -49,17 +49,17 @@
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "devDependencies": {
-    "@types/node": "^20.19.43",
+    "@types/node": "^26.0.0",
     "@types/react": "^19.2.17",
-    "typescript": "^5.9.3",
+    "typescript": "^6.0.3",
     "vue": "^3.5.38"
   },
   "peerDependencies": {
     "nytlex": "workspace:^",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
-    "vue": "^3.5.27",
-    "svelte": "^5.56.3"
+    "svelte": "^5.56.3",
+    "vue": "^3.5.27"
   },
   "peerDependenciesMeta": {
     "react-dom": {

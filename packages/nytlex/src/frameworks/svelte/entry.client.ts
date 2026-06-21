@@ -1,5 +1,5 @@
 /*
- * This file is part of the Vatts.js Project.
+ * This file is part of the Nytlex.js Project.
  * Copyright (c) 2026 mfraz
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -78,7 +78,6 @@ function updateOverlaysState() {
     }
 }
 
-// --- Lógica de Roteamento e Renderização (Svelte) ---
 async function renderRoute(routes: any[], componentMap: Record<string, any>) {
     const currentPath = window.location.pathname.replace("index.html", '');
     const match = findRouteForPath(currentPath, routes);
@@ -100,15 +99,12 @@ async function renderRoute(routes: any[], componentMap: Record<string, any>) {
 
     container.innerHTML = '';
 
-    const layoutData = window.__NYTLEX_LAYOUT__;
-    const LayoutComponentVisual = layoutData ? layoutData.component : null;
-
     if (!match) {
-        const NotFoundData = window.__NYTLEX_NOT_FOUND__;
-        const NotFoundComponent = NotFoundData ? (NotFoundData.default || NotFoundData) : null;
+        const NotFoundComponent = window.__NYTLEX_NOT_FOUND__;
+        const LayoutComponent = window.__NYTLEX_LAYOUT__;
 
         if (NotFoundComponent) {
-            mountSvelteComponent(NotFoundComponent, {}, LayoutComponentVisual, container);
+            mountSvelteComponent(NotFoundComponent, {}, LayoutComponent, container);
         } else {
             const { getDefaultNotFound } = window.__NYTLEX_DEFAULT_NOT_FOUND__ || { getDefaultNotFound: () => '404 Not Found' };
             container.innerHTML = getDefaultNotFound();
@@ -116,54 +112,60 @@ async function renderRoute(routes: any[], componentMap: Record<string, any>) {
         return;
     }
 
-    const routeData = componentMap[match.componentPath];
-    let PageComponent = routeData ? routeData.component : null;
+    let PageComponent = componentMap[match.componentPath];
+    const LayoutComponent = window.__NYTLEX_LAYOUT__;
+    let pageTitle = null;
 
-    try {
-        // 1. Resolve Metadata do Layout
-        let layoutMeta: any = {};
-        if (layoutData && layoutData.module) {
-            const layoutModule = layoutData.module;
-            layoutMeta = layoutModule.metadata || (layoutModule.default && layoutModule.default.metadata) || {};
-
-            const generateMeta = layoutModule.generateMetadata || (layoutModule.default && layoutModule.default.generateMetadata);
-            if (typeof generateMeta === 'function') {
-                const dynamicLayoutMeta = await generateMeta(match.params);
-                layoutMeta = { ...layoutMeta, ...dynamicLayoutMeta };
-            }
+    // 1. Pega do Layout primeiro (Fallback base)
+    if (LayoutComponent) {
+        if (typeof LayoutComponent.generateMetadata === 'function') {
+            const layoutMeta = await LayoutComponent.generateMetadata(match.params);
+            if (layoutMeta?.title) pageTitle = layoutMeta.title;
+        } else if (LayoutComponent.metadata?.title) {
+            pageTitle = LayoutComponent.metadata.title;
         }
-
-        // 2. Resolve Metadata da Página (acessando via loader)
-        let pageMeta: any = match.metadata || {};
-        if (routeData && routeData.loader) {
-            const pageModule = await routeData.loader();
-            pageMeta = { ...pageMeta, ...(pageModule.metadata || (pageModule.default && pageModule.default.metadata) || {}) };
-
-            const generateMeta = pageModule.generateMetadata || (pageModule.default && pageModule.default.generateMetadata);
-            if (typeof generateMeta === 'function') {
-                const dynamicPageMeta = await generateMeta(match.params);
-                if (dynamicPageMeta) pageMeta = { ...pageMeta, ...dynamicPageMeta };
-            }
-
-            // Garante que o PageComponent do Svelte foi resolvido se veio cru da importação lazy
-            if (typeof PageComponent === 'function' && !PageComponent.prototype) {
-                PageComponent = pageModule.default || pageModule;
-            }
-        }
-
-        // 3. Unifica e joga pro Document
-        const unifiedMeta = { ...layoutMeta, ...pageMeta };
-        if (unifiedMeta.title) {
-            updateDocumentTitle(unifiedMeta.title);
-        }
-
-    } catch (error) {
-        console.error('[Vatts.js Metadata] ❌ Erro ao resolver metadata do módulo em Svelte:', error);
     }
 
-    // 4. Monta a árvore visual de fato
+    // 2. Sobrescreve com o estático da rota atual
+    if (match.metadata?.title) {
+        pageTitle = match.metadata.title;
+    }
+
+    // 3. Resolve o Lazy Load e pega o Dinâmico da rota atual (Prioridade máxima)
     if (PageComponent) {
-        mountSvelteComponent(PageComponent, match.params, LayoutComponentVisual, container);
+        try {
+            const importFunc = PageComponent.__importFunc || (typeof PageComponent === 'function' && !PageComponent.prototype ? PageComponent : null);
+
+            let actualModule;
+            if (importFunc) {
+                // Executa o lazy load de verdade aqui!
+                actualModule = await importFunc();
+                PageComponent = actualModule.default || actualModule;
+            } else {
+                actualModule = PageComponent;
+            }
+
+            // No Svelte o context de módulo pode estar no actualModule, ou exportado direto
+            const metadataSource = actualModule.generateMetadata ? actualModule : PageComponent;
+
+            if (metadataSource && typeof metadataSource.generateMetadata === 'function') {
+                const dynamicMeta = await metadataSource.generateMetadata(match.params);
+                if (dynamicMeta && dynamicMeta.title) {
+                    pageTitle = dynamicMeta.title;
+                }
+            }
+        } catch (err) {
+            console.error('[Nytlex] Erro ao resolver componente Svelte ou metadata:', err);
+        }
+    }
+
+    // 4. Atualiza o título real da página
+    if (pageTitle) {
+        updateDocumentTitle(pageTitle);
+    }
+
+    if (PageComponent) {
+        mountSvelteComponent(PageComponent, match.params, LayoutComponent, container);
     }
 }
 

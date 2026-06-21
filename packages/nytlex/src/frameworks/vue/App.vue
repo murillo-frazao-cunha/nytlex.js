@@ -14,10 +14,41 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
 -->
+<template>
+  <component :is="resolvedLayout" v-if="resolvedLayout">
+    <component
+        :is="resolvedContent"
+        v-bind="contentProps"
+        :key="`page-${hmrTimestamp}-${currentPathKey}`"
+    />
+  </component>
+
+  <component
+      v-else
+      :is="resolvedContent"
+      v-bind="contentProps"
+      :key="`page-${hmrTimestamp}-${currentPathKey}`"
+  />
+
+  <nytlex-dev-badge
+      v-if="isDev"
+      :has-build-error="!!buildError"
+      @click-build-error="isErrorOpen = true"
+  ></nytlex-dev-badge>
+
+  <nytlex-error-modal
+      .error="buildError"
+      .isOpen="isErrorOpen"
+      @close-modal="isErrorOpen = false"
+      @copy-log="handleCopyLog"
+  ></nytlex-error-modal>
+</template>
+
 <script setup>
 import { ref, computed, onMounted, onUnmounted, shallowRef, watch, nextTick, defineComponent, h } from 'vue';
 import { router } from '../../client/clientRouter';
 
+// Importa a lógica centralizada
 import {
   findRouteForPath, updateDocumentTitle, copyBuildError,
   setupBuildErrorEvents, setupHMREvents, dispatchHmrReady
@@ -44,6 +75,7 @@ const buildError = ref(window.__NYTLEX_BUILD_ERROR__ || null);
 const isErrorOpen = ref(!!window.__NYTLEX_BUILD_ERROR__);
 const isDev = process.env.NODE_ENV !== 'production';
 
+// Cleanup references for events
 let cleanupErrorEvents;
 let cleanupHmrEvents;
 let unsubscribeRouter;
@@ -60,7 +92,6 @@ watch(hmrTimestamp, async (timestamp) => {
 // --- Roteamento ---
 const CurrentPageComponent = shallowRef(null);
 const params = ref({});
-const currentMetadata = ref({});
 
 const updateRoute = async () => {
   const currentPath = window.location.pathname.replace("index.html", '');
@@ -68,74 +99,74 @@ const updateRoute = async () => {
 
   const match = findRouteForPath(currentPath, props.routes);
   if (match) {
-    // Agora o componente vem de 'routeData.component'
-    const routeData = props.componentMap[match.componentPath];
-    CurrentPageComponent.value = routeData ? routeData.component : null;
+    const component = props.componentMap[match.componentPath];
+    CurrentPageComponent.value = component;
     params.value = match.params;
 
-    try {
-      // 1. Resolve Metadata do Layout
-      let layoutMeta = {};
-      // Lemos do .module que injetamos via Esbuild
-      if (props.layoutComponent && props.layoutComponent.module) {
-        const layoutModule = props.layoutComponent.module;
-        layoutMeta = layoutModule.metadata || (layoutModule.default && layoutModule.default.metadata) || {};
+    let pageTitle = null;
 
-        if (typeof layoutModule.generateMetadata === 'function') {
-          const dynamicLayoutMeta = await layoutModule.generateMetadata(params.value);
-          layoutMeta = { ...layoutMeta, ...dynamicLayoutMeta };
-        } else if (layoutModule.default && typeof layoutModule.default.generateMetadata === 'function') {
-          const dynamicLayoutMeta = await layoutModule.default.generateMetadata(params.value);
-          layoutMeta = { ...layoutMeta, ...dynamicLayoutMeta };
-        }
+    // 1. Pega do Layout primeiro (Fallback base)
+    const layoutComp = props.layoutComponent;
+    if (layoutComp) {
+      if (typeof layoutComp.generateMetadata === 'function') {
+        const layoutMeta = await layoutComp.generateMetadata(params.value);
+        if (layoutMeta?.title) pageTitle = layoutMeta.title;
+      } else if (layoutComp.metadata?.title) {
+        pageTitle = layoutComp.metadata.title;
       }
-
-      // 2. Resolve Metadata da Página acessando o módulo real via routeData.loader()
-      let pageMeta = match.metadata || {};
-      if (routeData && routeData.loader) {
-        // Invoca o import dinâmico que não está enjaulado pelo defineAsyncComponent
-        const pageModule = await routeData.loader();
-
-        pageMeta = { ...pageMeta, ...(pageModule.metadata || (pageModule.default && pageModule.default.metadata) || {}) };
-
-        if (typeof pageModule.generateMetadata === 'function') {
-          const dynamicPageMeta = await pageModule.generateMetadata(params.value);
-          if (dynamicPageMeta) pageMeta = { ...pageMeta, ...dynamicPageMeta };
-        } else if (pageModule.default && typeof pageModule.default.generateMetadata === 'function') {
-          const dynamicPageMeta = await pageModule.default.generateMetadata(params.value);
-          if (dynamicPageMeta) pageMeta = { ...pageMeta, ...dynamicPageMeta };
-        }
-      }
-
-      // 3. Unifica e joga pro watcher
-      currentMetadata.value = { ...layoutMeta, ...pageMeta };
-
-    } catch (error) {
-      console.error('[Vatts.js Metadata] ❌ Erro ao resolver metadata real do módulo:', error);
     }
 
+    // 2. Sobrescreve com o estático da rota atual (se existir)
+    if (match.metadata?.title) {
+      pageTitle = match.metadata.title;
+    }
+
+    // 3. Sobrescreve com o dinâmico da rota atual (Prioridade máxima)
+    if (component) {
+      try {
+        // Resolve o módulo real através da função de importação exposta no plugin
+        const actualModule = component.__importFunc
+            ? await component.__importFunc()
+            : component;
+
+        // Pega a exportação padrão do componente
+        const resolvedComp = actualModule?.default || actualModule;
+
+        if (resolvedComp && typeof resolvedComp.generateMetadata === 'function') {
+          const dynamicMeta = await resolvedComp.generateMetadata(params.value);
+          if (dynamicMeta && dynamicMeta.title) {
+            pageTitle = dynamicMeta.title;
+          }
+        }
+      } catch (err) {
+        console.error('[Nytlex] Erro ao resolver metadata da página:', err);
+      }
+    }
+
+    // 4. Atualiza o título real da página
+    if (pageTitle) {
+      updateDocumentTitle(pageTitle);
+    }
   } else {
     CurrentPageComponent.value = null;
     params.value = {};
-    currentMetadata.value = null;
   }
 };
-
-watch(currentMetadata, (newMeta) => {
-  if (newMeta && newMeta.title) {
-    updateDocumentTitle(newMeta.title);
-  }
-}, { deep: true });
-
 // --- Computed ---
 const resolvedContent = computed(() => {
   if (!CurrentPageComponent.value) {
-    const NotFoundData = window.__NYTLEX_NOT_FOUND__;
-    if (NotFoundData) return NotFoundData;
+    const NotFoundComponent = window.__NYTLEX_NOT_FOUND__;
+    if (NotFoundComponent) return NotFoundComponent;
 
-    const { getDefaultNotFound } = window.__NYTLEX_DEFAULT_NOT_FOUND__ || {};
+    const { getDefaultNotFound } = window.__NYTLEX_DEFAULT_NOT_FOUND__;
     return getDefaultNotFound
-        ? defineComponent({ render: () => h('div', { innerHTML: getDefaultNotFound() }) })
+        ? defineComponent({
+          render() {
+            return h('div', {
+              innerHTML: getDefaultNotFound()
+            });
+          }
+        })
         : 'div';
   }
   return CurrentPageComponent.value;
@@ -146,15 +177,13 @@ const contentProps = computed(() => {
   return { params: params.value };
 });
 
-const resolvedLayout = computed(() => {
-  // Ajuste pro template receber a parte certa do layout
-  return props.layoutComponent ? props.layoutComponent.component : null;
-});
+const resolvedLayout = computed(() => props.layoutComponent || null);
 
 // --- Lifecycle ---
 onMounted(() => {
   updateRoute();
 
+  // Usa as funções de eventos do Core
   cleanupErrorEvents = setupBuildErrorEvents(
       (err) => { buildError.value = err; isErrorOpen.value = true; },
       () => { buildError.value = null; isErrorOpen.value = false; }
@@ -173,6 +202,7 @@ onMounted(() => {
 onUnmounted(() => {
   if (cleanupErrorEvents) cleanupErrorEvents();
   if (cleanupHmrEvents) cleanupHmrEvents();
+
   window.removeEventListener('popstate', updateRoute);
   if (unsubscribeRouter) unsubscribeRouter();
 });

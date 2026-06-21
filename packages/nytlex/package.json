@@ -130,17 +130,17 @@
   },
   "dependencies": {
     "@vue/server-renderer": "^3.5.38",
-    "chokidar": "^3.6.0",
-    "commander": "^14.0.3",
+    "chokidar": "^5.0.0",
+    "commander": "^15.0.0",
     "cpx2": "^9.0.0",
     "esbuild": "^0.28.1",
     "esbuild-plugin-vue3": "^0.5.1",
     "esbuild-svelte": "^0.9.5",
-    "koffi": "^2.16.2",
-    "sharp": "^0.34.5",
-    "ts-loader": "9.5.4",
+    "koffi": "^3.0.2",
+    "sharp": "^0.35.2",
+    "ts-loader": "9.6.1",
     "ts-node": "^10.9.2",
-    "typescript": "^5.9.3",
+    "typescript": "^6.0.3",
     "ws": "^8.21.0"
   },
   "optionalDependencies": {
@@ -149,16 +149,16 @@
     "cookie-parser": "^1.4.7"
   },
   "devDependencies": {
-    "@libsql/client": "^0.17.3",
-    "@types/express": "^4.17.25",
+    "@libsql/client": "^0.17.4",
+    "@types/express": "^5.0.6",
     "@types/pg": "^8.20.0",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
     "@types/ws": "^8.18.1",
-    "@vue/tsconfig": "^0.8.1",
+    "@vue/tsconfig": "^0.9.1",
     "image-size": "^2.0.2",
     "mysql2": "^3.22.5",
-    "pg": "^8.21.0",
+    "pg": "^8.22.0",
     "vue": "^3.5.38",
     "vue-tsc": "^3.3.5"
   }
