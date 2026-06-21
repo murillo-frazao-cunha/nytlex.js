@@ -105,14 +105,14 @@ const updateRoute = async () => {
 
     let pageTitle = null;
 
+
     // 1. Pega do Layout primeiro (Fallback base)
-    const layoutComp = props.layoutComponent;
-    if (layoutComp) {
-      if (typeof layoutComp.generateMetadata === 'function') {
-        const layoutMeta = await layoutComp.generateMetadata(params.value);
-        if (layoutMeta?.title) pageTitle = layoutMeta.title;
-      } else if (layoutComp.metadata?.title) {
-        pageTitle = layoutComp.metadata.title;
+    const LayoutMetadata = window.__NYTLEX_LAYOUT_METADATA__ || {};
+
+    // 1. Pega do Layout primeiro (Fallback base)
+    if (LayoutMetadata) {
+      if (LayoutMetadata.title) {
+        pageTitle = LayoutMetadata.title;
       }
     }
 
@@ -124,17 +124,15 @@ const updateRoute = async () => {
     // 3. Sobrescreve com o dinâmico da rota atual (Prioridade máxima)
     if (component) {
       try {
-        console.log(component)
-        // Resolve o módulo real através da função de importação exposta no plugin
-        const actualModule = component.__importFunc
-            ? await component.__importFunc()
-            : component;
-        console.log(actualModule)
-        // Pega a exportação padrão do componente
-        const resolvedComp = actualModule?.default || actualModule;
+        // Usa a nova função de metadata exposta no wrapper do Vatts.js
+        if (typeof component.getMetadata === 'function') {
+          const dynamicMetaRaw = await component.getMetadata();
 
-        if (resolvedComp && typeof resolvedComp.generateMetadata === 'function') {
-          const dynamicMeta = await resolvedComp.generateMetadata(params.value);
+          let dynamicMeta = dynamicMetaRaw;
+          if (typeof dynamicMetaRaw === 'function') {
+            dynamicMeta = await dynamicMetaRaw(match.params);
+          }
+
           if (dynamicMeta && dynamicMeta.title) {
             pageTitle = dynamicMeta.title;
           }

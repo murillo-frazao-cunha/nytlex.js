@@ -35,6 +35,7 @@ declare global {
         __NYTLEX_DEFAULT_NOT_FOUND__?: { getDefaultNotFound: () => string };
         __NYTLEX_BUILD_ERROR__?: NytlexBuildError | null;
         __NYTLEX_SVELTE_INSTANCE__?: any; // Guarda a instância ativa para o HMR
+        __NYTLEX_LAYOUT_METADATA__?: Metadata;
     }
 }
 
@@ -114,45 +115,47 @@ async function renderRoute(routes: any[], componentMap: Record<string, any>) {
 
     let PageComponent = componentMap[match.componentPath];
     const LayoutComponent = window.__NYTLEX_LAYOUT__;
+
+    // Nova abstração do layout injetada pelo Esbuild
+    const LayoutMetadata = window.__NYTLEX_LAYOUT_METADATA__ || {};
     let pageTitle = null;
 
     // 1. Pega do Layout primeiro (Fallback base)
-    if (LayoutComponent) {
-        if (typeof LayoutComponent.generateMetadata === 'function') {
-            const layoutMeta = await LayoutComponent.generateMetadata(match.params);
-            if (layoutMeta?.title) pageTitle = layoutMeta.title;
-        } else if (LayoutComponent.metadata?.title) {
-            pageTitle = LayoutComponent.metadata.title;
+    if (LayoutMetadata) {
+         if (LayoutMetadata.title) {
+            pageTitle = LayoutMetadata.title;
         }
     }
 
-    // 2. Sobrescreve com o estático da rota atual
+    // 2. Sobrescreve com o estático da rota atual mapeado no build
     if (match.metadata?.title) {
         pageTitle = match.metadata.title;
     }
 
+    let ActualPageComponent = PageComponent;
+
     // 3. Resolve o Lazy Load e pega o Dinâmico da rota atual (Prioridade máxima)
     if (PageComponent) {
         try {
-            const importFunc = PageComponent.__importFunc || (typeof PageComponent === 'function' && !PageComponent.prototype ? PageComponent : null);
+            // Usa a nova função de metadata que criamos no wrapper sem precisar instanciar o componente todo
+            if (typeof PageComponent.getMetadata === 'function') {
+                const dynamicMetaRaw = await PageComponent.getMetadata();
 
-            let actualModule;
-            if (importFunc) {
-                // Executa o lazy load de verdade aqui!
-                actualModule = await importFunc();
-                PageComponent = actualModule.default || actualModule;
-            } else {
-                actualModule = PageComponent;
-            }
+                // Trata tanto metadata estático quanto generateMetadata() da página
+                let dynamicMeta = dynamicMetaRaw;
+                if (typeof dynamicMetaRaw === 'function') {
+                    dynamicMeta = await dynamicMetaRaw(match.params);
+                }
 
-            // No Svelte o context de módulo pode estar no actualModule, ou exportado direto
-            const metadataSource = actualModule.generateMetadata ? actualModule : PageComponent;
-
-            if (metadataSource && typeof metadataSource.generateMetadata === 'function') {
-                const dynamicMeta = await metadataSource.generateMetadata(match.params);
                 if (dynamicMeta && dynamicMeta.title) {
                     pageTitle = dynamicMeta.title;
                 }
+            }
+
+            // Resolve o módulo Svelte para a renderização visual
+            if (PageComponent.__importFunc) {
+                const actualModule = await PageComponent();
+                ActualPageComponent = actualModule.default || actualModule;
             }
         } catch (err) {
             console.error('[Nytlex] Erro ao resolver componente Svelte ou metadata:', err);
@@ -164,8 +167,9 @@ async function renderRoute(routes: any[], componentMap: Record<string, any>) {
         updateDocumentTitle(pageTitle);
     }
 
-    if (PageComponent) {
-        mountSvelteComponent(PageComponent, match.params, LayoutComponent, container);
+    // Passa o componente já resolvido para o mount
+    if (ActualPageComponent) {
+        mountSvelteComponent(ActualPageComponent, match.params, LayoutComponent, container);
     }
 }
 

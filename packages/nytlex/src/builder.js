@@ -24,7 +24,7 @@ const { config } = require("./helpers");
 // Import Framework specific builders
 const { createReactConfig } = require('./frameworks/builds/react.build');
 const { createVueConfig } = require('./frameworks/builds/vue.build');
-const { createSvelteConfig } = require('./frameworks/builds/svelte.build'); // Adicionado suporte ao Svelte
+const { createSvelteConfig } = require('./frameworks/builds/svelte.build');
 const routerModule = require("./router");
 
 const excludedFiles = ['nytlex.sock'];
@@ -71,7 +71,6 @@ const requireContextPlugin = () => ({
                     let files;
                     try { files = fs.readdirSync(dir); } catch (e) { return filelist; }
                     files.forEach(function (file) {
-                        // OTIMIZAÇÃO DE MEMÓRIA: Evitar varredura em diretórios pesados e desnecessários
                         if (file === 'node_modules' || file === '.git' || file === '.nytlex') return;
 
                         const filepath = path.join(dir, file);
@@ -127,7 +126,6 @@ const virtualEntryPlugin = (options) => ({
             return { path: virtualEntryId, namespace: 'nytlex-virtual' };
         });
 
-        // Touch sentinel to trigger custom framework reloads if needed
         build.onStart(() => {
             const nytlexDir = path.join(projectDir, '.nytlex');
             try { fs.mkdirSync(nytlexDir, { recursive: true }); } catch (e) { }
@@ -141,7 +139,6 @@ const virtualEntryPlugin = (options) => ({
             const notFound = options.notFound;
             const framework = options.framework;
 
-            // Função para garantir que caminhos relativos comecem com ./
             const formatPath = (p) => {
                 const normalized = p.replace(/\\/g, '/');
                 if (!normalized.startsWith('./') && !normalized.startsWith('../') && !path.isAbsolute(normalized)) {
@@ -150,14 +147,14 @@ const virtualEntryPlugin = (options) => ({
                 return normalized;
             };
 
-            const layoutImport = layout ? `import LayoutComponent from '${formatPath(layout.componentPath)}';` : '';
+            const layoutImport = layout ? `import * as LayoutModule from '${formatPath(layout.componentPath)}';` : '';
             const notFoundImport = notFound ? `import NotFoundComponent from '${formatPath(notFound.componentPath)}';` : '';
             const defaultNotFoundPath = path.join(__dirname, 'frameworks', 'themes', 'DefaultNotFound.js').replace(/\\/g, '/');
 
-            // Importações nativas de otimização de Lazy Load por framework
             const reactImport = framework === 'react' ? `import React, { useState, useEffect } from 'react';` : '';
             const vueImport = framework === 'vue' ? `import { defineAsyncComponent } from 'vue';` : '';
 
+            // WRAPPERS: Acesso via bracket ['metadata'] para enganar a análise estática do Esbuild
             const wrapperFunction = framework === 'react' ? `
 const __nytlexLazy = (importFunc) => {
     const Wrapper = (props) => {
@@ -169,22 +166,39 @@ const __nytlexLazy = (importFunc) => {
         }, []);
         return Comp ? React.createElement(Comp, props) : null;
     };
-    Wrapper.__importFunc = importFunc; // Expõe a promise para o router ler a metadata
+    Wrapper.__importFunc = importFunc; 
+    Wrapper.getMetadata = () => importFunc().then(async (m) => {
+  if (typeof m['generateMetadata'] === 'function') {
+    return await m['generateMetadata']();
+  }
+  return {};
+});
     return Wrapper;
 };` : framework === 'vue' ? `
 const __nytlexLazy = (importFunc) => {
     const comp = defineAsyncComponent(importFunc);
-    comp.__importFunc = importFunc; // Expõe a promise para o router ler a metadata
+    comp.__importFunc = importFunc; 
+    comp.getMetadata = () => importFunc().then(async (m) => {
+  if (typeof m['generateMetadata'] === 'function') {
+    return await m['generateMetadata']();
+  }
+  return {};
+});
     return comp;
 };
 ` : `
 const __nytlexLazy = (importFunc) => {
-    importFunc.__importFunc = importFunc; // Svelte/Vanilla: expõe a promise direto na função
+    importFunc.__importFunc = importFunc; 
+    importFunc.getMetadata = () => importFunc().then(async (m) => {
+  if (typeof m['generateMetadata'] === 'function') {
+    return await m['generateMetadata']();
+  }
+  return {};
+});
     return importFunc;
 };
 `;
 
-            // Envolvendo os imports na respectiva abstração de cada framework
             let componentRegistration = routes
                 .map((route, index) => {
                     const pathStr = formatPath(route.componentPath);
@@ -192,10 +206,19 @@ const __nytlexLazy = (importFunc) => {
                 })
                 .join('\n');
 
-            const layoutRegistration = layout ? `window.__NYTLEX_LAYOUT__ = LayoutComponent.default || LayoutComponent;` : `window.__NYTLEX_LAYOUT__ = null;`;
+            // REGISTRO DO LAYOUT ATUALIZADO: Removemos a obfuscação da key (que forçava tree-shaking) e expomos os metadados diretamente.
+            const layoutRegistration = layout ? `
+window.__NYTLEX_LAYOUT__ = LayoutModule.default || LayoutModule;
+
+const meta = ["met", "adata"].join('')
+window.__NYTLEX_LAYOUT_METADATA__ = LayoutModule[meta] || {};
+` : `
+window.__NYTLEX_LAYOUT__ = null;
+window.__NYTLEX_LAYOUT_METADATA__ = null;
+window.__NYTLEX_LAYOUT_GENERATE_METADATA__ = null;
+`;
             const notFoundRegistration = notFound ? `window.__NYTLEX_NOT_FOUND__ = NotFoundComponent.default || NotFoundComponent;` : `window.__NYTLEX_NOT_FOUND__ = null;`;
 
-            // Mapeamos as rotas e injetamos globalmente na entry
             const clientRoutes = routes.map(r => ({
                 pattern: r.pattern,
                 componentPath: formatPath(r.componentPath),
@@ -285,15 +308,9 @@ const customPostCssPlugin = () => ({
             postcss = require('postcss');
             autoprefixer = require('autoprefixer');
             try { postcssLoadConfig = require('postcss-load-config'); } catch(e) {}
-            try {
-                tailwindcss = require('@tailwindcss/postcss');
-            } catch (e) {
-                tailwindcss = require('tailwindcss');
-            }
-        } catch (e) {
-        }
+            try { tailwindcss = require('@tailwindcss/postcss'); } catch (e) { tailwindcss = require('tailwindcss'); }
+        } catch (e) {}
 
-        // OTIMIZAÇÃO DE MEMÓRIA: Carrega as configs UMA ÚNICA VEZ.
         let processor = null;
         let initialized = false;
 
@@ -302,17 +319,13 @@ const customPostCssPlugin = () => ({
             initialized = true;
 
             try {
-                // 1. Tenta carregar o arquivo postcss.config.js se o pacote existir
                 if (postcssLoadConfig) {
                     const { plugins } = await postcssLoadConfig();
                     processor = postcss(plugins);
                     return;
                 }
-            } catch (err) {
-                // Se falhar (ex: não tem arquivo de config), cai no fallback abaixo
-            }
+            } catch (err) {}
 
-            // 2. Fallback: Configura e lê o tailwind.config.js manualmente
             if (tailwindcss) {
                 const tailwindConfigPath = path.join(process.cwd(), 'tailwind.config.js');
                 const hasTailwindConfig = fs.existsSync(tailwindConfigPath);
@@ -332,10 +345,7 @@ const customPostCssPlugin = () => ({
 
             if (processor) {
                 try {
-                    const result = await processor.process(cssContent, {
-                        from: args.path,
-                        to: args.path
-                    });
+                    const result = await processor.process(cssContent, { from: args.path, to: args.path });
                     cssContent = result.css;
                 } catch (err) {
                     Console.warn("Erro ao compilar Tailwind/PostCSS:", err.message);
@@ -364,7 +374,7 @@ function detectFramework(projectDir = process.cwd()) {
             const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
             const deps = { ...pkg.dependencies, ...pkg.devDependencies };
             if (deps.vue || deps['nuxt']) return 'vue';
-            if (deps.svelte) return 'svelte'; // Adicionado suporte para detecção do Svelte
+            if (deps.svelte) return 'svelte';
         }
     } catch (e) {}
     return 'react';
@@ -396,17 +406,11 @@ async function getFrameworkConfig(nytlexOptions, outdir, isProduction, isWatch =
     if (framework === 'vue') {
         config = await createVueConfig(entryPoint, outdir, isProduction, pluginConfig);
     } else if (framework === 'svelte') {
-        // Adicionado fallback para o construtor do Svelte
         config = await createSvelteConfig(entryPoint, outdir, isProduction, pluginConfig);
     } else {
         config = await createReactConfig(entryPoint, outdir, isProduction, pluginConfig);
     }
 
-    // --- INÍCIO DA IMPLEMENTAÇÃO DE CHUNKS E OTIMIZAÇÃO MÁXIMA ---
-    // MANTENHA APENAS A ENTRADA MAIN.
-    // O erro do carregamento em massa acontecia pois todas as rotas eram declaradas
-    // como "EntryPoints" manuais, forçando a tag <script> nelas na página.
-    // O Esbuild faz code-splitting automático com base nos dynamic imports!
     const entryPoints = { 'main': entryPoint };
 
     config.entryPoints = entryPoints;
@@ -429,7 +433,6 @@ async function getFrameworkConfig(nytlexOptions, outdir, isProduction, isWatch =
         config.minifySyntax = true;
         config.target = ['es2020'];
     }
-    // --- FIM DA IMPLEMENTAÇÃO ---
     config.entryNames = '[name]-[hash]';
     return config;
 }
@@ -478,9 +481,6 @@ async function watchWithChunks(nytlexOptions, outdir, hotReloadManager = null) {
         const config = await getFrameworkConfig(nytlexOptions, outdir, false, true);
         let buildSeq = 0;
 
-        // RESOLVENDO O PROBLEMA DOS SOURCEMAPS
-        // 'inline' atrapalha as DevTools do Chrome a mapear chunks dinâmicos corretamente.
-        // True gera arquivos .map que o Chrome usa para mostrar os erros no .tsx, .vue e .svelte originais.
         config.sourcemap = true;
 
         config.plugins.push({

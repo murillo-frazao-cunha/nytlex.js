@@ -146,13 +146,13 @@ function App({ componentMap, routes, initialComponentPath, initialParams, layout
 
             let pageTitle = null;
 
+            // Puxando a nova abstração global injetada pelo Esbuild
+            const LayoutMetadata = window.__NYTLEX_LAYOUT_METADATA__ || {};
+
             // 1. Pega do Layout primeiro (Fallback base)
-            if (layoutComponent) {
-                if (typeof layoutComponent.generateMetadata === 'function') {
-                    const layoutMeta = await layoutComponent.generateMetadata(match.params);
-                    if (layoutMeta?.title) pageTitle = layoutMeta.title;
-                } else if (layoutComponent.metadata?.title) {
-                    pageTitle = layoutComponent.metadata.title;
+            if (LayoutMetadata) {
+                 if (LayoutMetadata.title) {
+                    pageTitle = LayoutMetadata.title;
                 }
             }
 
@@ -164,15 +164,15 @@ function App({ componentMap, routes, initialComponentPath, initialParams, layout
             // 3. Sobrescreve com o dinâmico da rota atual (Prioridade máxima)
             if (component) {
                 try {
-                    // Usa a função exposta no wrapper virtual do Esbuild
-                    const actualModule = component.__importFunc
-                        ? await component.__importFunc()
-                        : component;
+                    // Usa a nova função de metadata exposta no wrapper do Vatts.js
+                    if (typeof component.getMetadata === 'function') {
+                        const dynamicMetaRaw = await component.getMetadata();
 
-                    const resolvedComp = actualModule?.default || actualModule;
+                        let dynamicMeta = dynamicMetaRaw;
+                        if (typeof dynamicMetaRaw === 'function') {
+                            dynamicMeta = await dynamicMetaRaw(match.params);
+                        }
 
-                    if (resolvedComp && typeof resolvedComp.generateMetadata === 'function') {
-                        const dynamicMeta = await resolvedComp.generateMetadata(match.params);
                         if (dynamicMeta && dynamicMeta.title) {
                             pageTitle = dynamicMeta.title;
                         }
@@ -187,11 +187,11 @@ function App({ componentMap, routes, initialComponentPath, initialParams, layout
                 updateDocumentTitle(pageTitle);
             }
         } else {
-            console.warn(`[Nytlex] ⚠️ Rota não encontrada (404): ${currentPath}`);
             setCurrentPageComponent(null);
             setParams({});
         }
-    }, [router.pathname, getMatch, componentMap, layoutComponent]); // <- Note que adicionei o layoutComponent aqui nas dependências
+// Removi o layoutComponent das dependências, já que agora usamos a global do Window
+    }, [router.pathname, getMatch, componentMap]); // <- Note que adicionei o layoutComponent aqui nas dependências
 
     useEffect(() => {
         updateRoute();

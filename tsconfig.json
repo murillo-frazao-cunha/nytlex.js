@@ -3,6 +3,6 @@
   "references": [
     { "path": "packages/nytlex"},
     { "path": "packages/auth" },
-    { "path": "packages/@nytlex-create"}
+    { "path": "packages/create-nytlex"}
   ]
 }
