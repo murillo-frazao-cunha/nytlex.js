@@ -10,7 +10,10 @@
     "skipLibCheck": true,
     "jsx": "react",
     "moduleResolution": "nodenext",
-    "allowJs": true
+    "allowJs": true,
+
+    "types": ["node"],
+    "lib": ["ESNext"]
   },
   "include": ["src"],
   "exclude": ["node_modules", "dist"]

@@ -21,14 +21,14 @@ export class ExpressAdapter implements FrameworkAdapter {
     type = 'express' as const;
 
     parseRequest(req: ExpressRequest): GenericRequest {
-
         return {
             method: req.method,
             url: req.url,
             headers: req.headers as Record<string, string | string[]>,
             body: req.body,
             query: req.query as Record<string, any>,
-            params: req.params,
+            // Ajuste aqui: cast explícito para o formato esperado pela interface
+            params: req.params as Record<string, string>,
             cookies: req.cookies || {},
             raw: req,
         };

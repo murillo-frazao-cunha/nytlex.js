@@ -20,7 +20,7 @@ import type { CreateAppContext } from "../core/types";
 async function getLatest(pkg: string, fallback: string): Promise<string> {
   try {
     const response = await fetch(`https://registry.npmjs.org/${pkg}/latest`);
-    const data = await response.json();
+    const data = await response.json() as { version: string };
     return data.version;
   } catch (error) {
     Console.error(`Could not check for the latest ${pkg} version:`, error);
