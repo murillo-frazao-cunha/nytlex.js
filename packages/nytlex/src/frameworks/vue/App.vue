@@ -124,11 +124,12 @@ const updateRoute = async () => {
     // 3. Sobrescreve com o dinâmico da rota atual (Prioridade máxima)
     if (component) {
       try {
+        console.log(component)
         // Resolve o módulo real através da função de importação exposta no plugin
         const actualModule = component.__importFunc
             ? await component.__importFunc()
             : component;
-
+        console.log(actualModule)
         // Pega a exportação padrão do componente
         const resolvedComp = actualModule?.default || actualModule;
 
