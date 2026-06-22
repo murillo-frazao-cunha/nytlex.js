@@ -14,7 +14,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import { mount, unmount, createRawSnippet } from 'svelte';
+import { mount, hydrate, unmount, createRawSnippet } from 'svelte';
 import { router } from '../../client/clientRouter.ts';
 import type { Metadata } from "../../types.ts";
 
@@ -34,7 +34,7 @@ declare global {
         __NYTLEX_NOT_FOUND__?: any;
         __NYTLEX_DEFAULT_NOT_FOUND__?: { getDefaultNotFound: () => string };
         __NYTLEX_BUILD_ERROR__?: NytlexBuildError | null;
-        __NYTLEX_SVELTE_INSTANCE__?: any; // Guarda a instância ativa para o HMR
+        __NYTLEX_SVELTE_INSTANCE__?: any;
         __NYTLEX_LAYOUT_METADATA__?: Metadata;
     }
 }
@@ -79,15 +79,30 @@ function updateOverlaysState() {
     }
 }
 
-async function renderRoute(routes: any[], componentMap: Record<string, any>) {
+async function renderRoute(routes: any[], componentMap: Record<string, any>, isInitialRender: boolean = false) {
     const currentPath = window.location.pathname.replace("index.html", '');
     const match = findRouteForPath(currentPath, routes);
 
     const container = document.getElementById('root');
     if (!container) return;
 
-    // Destrói a instância anterior do Svelte para evitar memory leaks (Svelte 4/5 compat)
-    if (currentAppInstance) {
+    let PageComponent = match ? componentMap[match.componentPath] : null;
+    let ActualPageComponent = PageComponent;
+    const LayoutComponent = window.__NYTLEX_LAYOUT__;
+
+    // PRELOAD DO CHUNK: Resolvemos a Promise da página ANTES de tocar no DOM.
+    // Isso garante que o Svelte não jogue o HTML do SSR fora pra renderizar uma tela vazia.
+    if (PageComponent && typeof PageComponent.__importFunc === 'function') {
+        try {
+            const actualModule = await PageComponent.__importFunc();
+            ActualPageComponent = actualModule.default || actualModule;
+        } catch (err) {
+            console.error('[Nytlex] Erro ao resolver o chunk Svelte:', err);
+        }
+    }
+
+    // Só destrói a instância anterior APÓS baixar o componente novo
+    if (!isInitialRender && currentAppInstance) {
         try {
             if (typeof currentAppInstance.$destroy === 'function') {
                 currentAppInstance.$destroy();
@@ -98,14 +113,15 @@ async function renderRoute(routes: any[], componentMap: Record<string, any>) {
         currentAppInstance = null;
     }
 
-    container.innerHTML = '';
+    // NUNCA limpa o innerHTML no render inicial do SSR!
+    if (!isInitialRender) {
+        container.innerHTML = '';
+    }
 
     if (!match) {
         const NotFoundComponent = window.__NYTLEX_NOT_FOUND__;
-        const LayoutComponent = window.__NYTLEX_LAYOUT__;
-
         if (NotFoundComponent) {
-            mountSvelteComponent(NotFoundComponent, {}, LayoutComponent, container);
+            mountSvelteComponent(NotFoundComponent, {}, LayoutComponent, container, isInitialRender);
         } else {
             const { getDefaultNotFound } = window.__NYTLEX_DEFAULT_NOT_FOUND__ || { getDefaultNotFound: () => '404 Not Found' };
             container.innerHTML = getDefaultNotFound();
@@ -113,35 +129,22 @@ async function renderRoute(routes: any[], componentMap: Record<string, any>) {
         return;
     }
 
-    let PageComponent = componentMap[match.componentPath];
-    const LayoutComponent = window.__NYTLEX_LAYOUT__;
-
-    // Nova abstração do layout injetada pelo Esbuild
     const LayoutMetadata = window.__NYTLEX_LAYOUT_METADATA__ || {};
     let pageTitle = null;
 
-    // 1. Pega do Layout primeiro (Fallback base)
-    if (LayoutMetadata) {
-         if (LayoutMetadata.title) {
-            pageTitle = LayoutMetadata.title;
-        }
+    if (LayoutMetadata && LayoutMetadata.title) {
+        pageTitle = LayoutMetadata.title;
     }
 
-    // 2. Sobrescreve com o estático da rota atual mapeado no build
     if (match.metadata?.title) {
         pageTitle = match.metadata.title;
     }
 
-    let ActualPageComponent = PageComponent;
-
-    // 3. Resolve o Lazy Load e pega o Dinâmico da rota atual (Prioridade máxima)
-    if (PageComponent) {
+    if (ActualPageComponent) {
         try {
-            // Usa a nova função de metadata que criamos no wrapper sem precisar instanciar o componente todo
-            if (typeof PageComponent.getMetadata === 'function') {
-                const dynamicMetaRaw = await PageComponent.getMetadata();
+            if (typeof ActualPageComponent.getMetadata === 'function') {
+                const dynamicMetaRaw = await ActualPageComponent.getMetadata();
 
-                // Trata tanto metadata estático quanto generateMetadata() da página
                 let dynamicMeta = dynamicMetaRaw;
                 if (typeof dynamicMetaRaw === 'function') {
                     dynamicMeta = await dynamicMetaRaw(match.params);
@@ -151,50 +154,43 @@ async function renderRoute(routes: any[], componentMap: Record<string, any>) {
                     pageTitle = dynamicMeta.title;
                 }
             }
-
-            // Resolve o módulo Svelte para a renderização visual
-            if (PageComponent.__importFunc) {
-                const actualModule = await PageComponent();
-                ActualPageComponent = actualModule.default || actualModule;
-            }
-        } catch (err) {
-            console.error('[Nytlex] Erro ao resolver componente Svelte ou metadata:', err);
-        }
+        } catch (err) {}
     }
 
-    // 4. Atualiza o título real da página
     if (pageTitle) {
         updateDocumentTitle(pageTitle);
     }
 
-    // Passa o componente já resolvido para o mount
     if (ActualPageComponent) {
-        mountSvelteComponent(ActualPageComponent, match.params, LayoutComponent, container);
+        mountSvelteComponent(ActualPageComponent, match.params, LayoutComponent, container, isInitialRender);
     }
 }
 
-function mountSvelteComponent(PageComponent: any, params: any, LayoutComponent: any, target: HTMLElement) {
+function mountSvelteComponent(PageComponent: any, params: any, LayoutComponent: any, target: HTMLElement, isInitialRender: boolean) {
     try {
+        // Verifica se há SSR no container para usarmos "Hidratação" e não "Mount"
+        const hasSSRHtml = isInitialRender && target.hasChildNodes();
+        const useSvelte5Hydrate = hasSSRHtml && typeof hydrate === 'function';
+
         if (LayoutComponent) {
             let pageInstance: any = null;
             let childSnippet: any = undefined;
 
-            // Cria o Snippet para injeção
             if (typeof createRawSnippet === 'function') {
                 childSnippet = createRawSnippet(() => {
                     return {
                         render: () => '<div style="display:contents" class="nytlex-page-wrapper"></div>',
                         setup: (node: Element) => {
-                            // Suporte tanto pra Svelte 5 (mount) quanto Svelte 4 fallback
                             if (typeof mount === 'function') {
-                                pageInstance = mount(PageComponent, {
+                                // Svelte 5: Usa hydrate se estivermos na carga inicial
+                                const svelteFn = useSvelte5Hydrate ? hydrate : mount;
+                                pageInstance = svelteFn(PageComponent, {
                                     target: node as HTMLElement,
                                     props: { params }
                                 });
                             } else {
-                                pageInstance = new PageComponent({ target: node, props: { params } });
+                                pageInstance = new PageComponent({ target: node, props: { params }, hydrate: hasSSRHtml });
                             }
-
                             return () => {
                                 if (pageInstance) {
                                     try {
@@ -208,22 +204,21 @@ function mountSvelteComponent(PageComponent: any, params: any, LayoutComponent: 
                 });
             }
 
-            // Svelte 5
             if (typeof mount === 'function') {
-                currentAppInstance = mount(LayoutComponent, {
+                const rootFn = useSvelte5Hydrate ? hydrate : mount;
+                currentAppInstance = rootFn(LayoutComponent, {
                     target,
                     props: {
                         params,
-                        children: childSnippet, // 👈 Para Layouts usando Svelte 5 Runes: {@render children()}
-                        $$slots: { default: childSnippet }, // 👈 A MAGIA AQUI: Para Layouts Svelte 4/Legacy usando: <slot />
+                        children: childSnippet,
+                        $$slots: { default: childSnippet },
                         $$scope: {}
                     }
                 });
-            }
-            // Fallback Svelte 4 puro
-            else {
+            } else {
                 currentAppInstance = new LayoutComponent({
                     target,
+                    hydrate: hasSSRHtml, // Fallback do Svelte 4
                     props: {
                         params,
                         $$slots: {
@@ -235,7 +230,7 @@ function mountSvelteComponent(PageComponent: any, params: any, LayoutComponent: 
                                             const wrapper = document.createElement('div');
                                             wrapper.style.display = 'contents';
                                             node.insertBefore(wrapper, anchor || null);
-                                            pageInstance = new PageComponent({ target: wrapper, props: { params } });
+                                            pageInstance = new PageComponent({ target: wrapper, props: { params }, hydrate: hasSSRHtml });
                                         },
                                         d: function() { if (pageInstance) pageInstance.$destroy(); },
                                         l: function() {}
@@ -250,9 +245,10 @@ function mountSvelteComponent(PageComponent: any, params: any, LayoutComponent: 
 
         } else {
             if (typeof mount === 'function') {
-                currentAppInstance = mount(PageComponent, { target, props: { params } });
+                const rootFn = useSvelte5Hydrate ? hydrate : mount;
+                currentAppInstance = rootFn(PageComponent, { target, props: { params } });
             } else {
-                currentAppInstance = new PageComponent({ target, props: { params } });
+                currentAppInstance = new PageComponent({ target, hydrate: hasSSRHtml, props: { params } });
             }
         }
 
@@ -269,18 +265,6 @@ async function initializeClient() {
         const routes = window.__NYTLEX_ROUTES__ || [];
         const componentMap = window.__NYTLEX_COMPONENTS__ || {};
 
-        // Se HMR recarregou, limpa a instância salva
-        if (window.__NYTLEX_SVELTE_INSTANCE__) {
-            try {
-                if (typeof window.__NYTLEX_SVELTE_INSTANCE__.$destroy === 'function') {
-                    window.__NYTLEX_SVELTE_INSTANCE__.$destroy();
-                } else {
-                    unmount(window.__NYTLEX_SVELTE_INSTANCE__);
-                }
-            } catch (e) { }
-            window.__NYTLEX_SVELTE_INSTANCE__ = null;
-        }
-
         setupOverlays();
 
         setupBuildErrorEvents(
@@ -291,16 +275,18 @@ async function initializeClient() {
         let pendingHmr: { file: string | null; timestamp: number } | null = null;
         setupHMREvents(async (file, timestamp) => {
             pendingHmr = { file, timestamp };
-            await renderRoute(routes, componentMap);
+            // HMR não usa Hidratação. Remonta tudo na marra!
+            await renderRoute(routes, componentMap, false);
             dispatchHmrReady(pendingHmr);
             pendingHmr = null;
         });
 
-        const handleRouteUpdate = () => renderRoute(routes, componentMap);
+        const handleRouteUpdate = () => renderRoute(routes, componentMap, false);
         window.addEventListener('popstate', handleRouteUpdate);
         router.subscribe(handleRouteUpdate);
 
-        await renderRoute(routes, componentMap);
+        // O render inicial PASSA isInitialRender = true, ativando a hidratação SSR!
+        await renderRoute(routes, componentMap, true);
 
     } catch (error: any) {
         renderCriticalError(error, 'Svelte');

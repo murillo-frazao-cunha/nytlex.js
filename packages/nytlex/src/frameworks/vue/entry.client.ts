@@ -14,7 +14,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import { createApp, type App as VueApp } from 'vue';
+import { createApp, createSSRApp, type App as VueApp } from 'vue';
 import App from './App.vue';
 
 // Importa a lógica centralizada (agora usando findRouteForPath ao invés de getInitialClientData)
@@ -26,7 +26,7 @@ declare global {
     }
 }
 
-function initializeClient() {
+async function initializeClient() {
     try {
         // Resolve a rota e params inicial calculando diretamente no lado do cliente
         // a partir da injeção global do esbuild
@@ -47,28 +47,76 @@ function initializeClient() {
         const container = document.getElementById('root');
         if (!container) throw new Error('Container #root not found.');
 
+        // PRELOAD DO CHUNK INICIAL PARA NÃO PISCAR A TELA NO SSR
+        let resolvedInitialComponent = null;
+        if (initialComponentPath !== '__404__') {
+            const wrapper = componentMap[initialComponentPath];
+            // Verifica se é uma Promise (import assíncrono do esbuild)
+            if (wrapper && typeof wrapper.__importFunc === 'function') {
+                try {
+                    const m = await wrapper.__importFunc();
+                    resolvedInitialComponent = m.default || Object.values(m)[0] || m;
+                } catch (e) {
+                    console.error('[Nytlex] Error preloading initial component:', e);
+                }
+            } else {
+                resolvedInitialComponent = wrapper;
+            }
+        }
+
         if (window.__NYTLEX_APP__) {
+            console.log('[Nytlex] ♻️ HMR detectado: Limpando a root do Vue...');
             try {
                 window.__NYTLEX_APP__.unmount();
                 container.innerHTML = '';
             } catch (e) {
                 console.warn('[Nytlex] Warning during unmount:', e);
             }
+
+            const app = createApp(App, {
+                componentMap,
+                routes,
+                initialComponentPath,
+                initialParams,
+                layoutComponent: (window as any).__NYTLEX_LAYOUT__,
+                initialResolvedComponent: resolvedInitialComponent
+            });
+
+            app.config.compilerOptions.isCustomElement = (tag) => tag.startsWith('nytlex-');
+            window.__NYTLEX_APP__ = app;
+            app.mount(container);
+
+        } else {
+            // SE O CONTAINER JÁ TEM FILHOS (SSR FUNCIONOU), USAMOS O SSR APP DO VUE.
+            // Isso funde o Vue com o HTML existente suavemente, bloqueando a piscada branca.
+            if (container.hasChildNodes()) {
+                const app = createSSRApp(App, {
+                    componentMap,
+                    routes,
+                    initialComponentPath,
+                    initialParams,
+                    layoutComponent: (window as any).__NYTLEX_LAYOUT__,
+                    initialResolvedComponent: resolvedInitialComponent
+                });
+
+                app.config.compilerOptions.isCustomElement = (tag) => tag.startsWith('nytlex-');
+                window.__NYTLEX_APP__ = app;
+                app.mount(container);
+            } else {
+                const app = createApp(App, {
+                    componentMap,
+                    routes,
+                    initialComponentPath,
+                    initialParams,
+                    layoutComponent: (window as any).__NYTLEX_LAYOUT__,
+                    initialResolvedComponent: resolvedInitialComponent
+                });
+
+                app.config.compilerOptions.isCustomElement = (tag) => tag.startsWith('nytlex-');
+                window.__NYTLEX_APP__ = app;
+                app.mount(container);
+            }
         }
-
-        const app = createApp(App, {
-            componentMap,
-            routes, // Passamos as rotas globais
-            initialComponentPath, // Passamos o path resolvido
-            initialParams, // Passamos os parâmetros da URL
-            layoutComponent: (window as any).__NYTLEX_LAYOUT__
-        });
-
-        // Configuração para suportar os Web Components de desenvolvimento do Nytlex
-        app.config.compilerOptions.isCustomElement = (tag) => tag.startsWith('nytlex-');
-
-        window.__NYTLEX_APP__ = app;
-        app.mount(container);
 
     } catch (error: any) {
         renderCriticalError(error, 'Vue');

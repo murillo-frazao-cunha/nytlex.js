@@ -121,6 +121,7 @@ const virtualEntryPlugin = (options) => ({
     setup(build) {
         const virtualEntryId = 'virtual:nytlex-entry';
         const projectDir = options.projectDir || process.cwd();
+        const sentinelFile = path.join(projectDir, '.nytlex', '.entry-sentinel');
 
         build.onResolve({ filter: /^virtual:nytlex-entry$/ }, () => {
             return { path: virtualEntryId, namespace: 'nytlex-virtual' };
@@ -129,8 +130,10 @@ const virtualEntryPlugin = (options) => ({
         build.onStart(() => {
             const nytlexDir = path.join(projectDir, '.nytlex');
             try { fs.mkdirSync(nytlexDir, { recursive: true }); } catch (e) { }
-            const sentinelFile = path.join(nytlexDir, '.entry-sentinel');
-            try { fs.writeFileSync(sentinelFile, Date.now().toString()); } catch (e) { }
+            // Apenas cria o sentinel inicial se ele não existir, para não causar loops de watch
+            if (!fs.existsSync(sentinelFile)) {
+                try { fs.writeFileSync(sentinelFile, Date.now().toString()); } catch (e) { }
+            }
         });
 
         build.onLoad({ filter: /.*/, namespace: 'nytlex-virtual' }, async () => {
@@ -154,7 +157,6 @@ const virtualEntryPlugin = (options) => ({
             const reactImport = framework === 'react' ? `import React, { useState, useEffect } from 'react';` : '';
             const vueImport = framework === 'vue' ? `import { defineAsyncComponent } from 'vue';` : '';
 
-            // WRAPPERS: Acesso via bracket ['metadata'] para enganar a análise estática do Esbuild
             const wrapperFunction = framework === 'react' ? `
 const __nytlexLazy = (importFunc) => {
     const Wrapper = (props) => {
@@ -166,35 +168,32 @@ const __nytlexLazy = (importFunc) => {
         }, []);
         return Comp ? React.createElement(Comp, props) : null;
     };
-    Wrapper.__importFunc = importFunc; 
+    Wrapper.__importFunc = importFunc;
     Wrapper.getMetadata = () => importFunc().then(async (m) => {
-  if (typeof m['generateMetadata'] === 'function') {
-    return await m['generateMetadata']();
-  }
-  return {};
-});
+        const genKey = ['generate', 'Metadata'].join('');
+        if (typeof m[genKey] === 'function') return await m[genKey]();
+        return {};
+    });
     return Wrapper;
 };` : framework === 'vue' ? `
 const __nytlexLazy = (importFunc) => {
     const comp = defineAsyncComponent(importFunc);
-    comp.__importFunc = importFunc; 
+    comp.__importFunc = importFunc;
     comp.getMetadata = () => importFunc().then(async (m) => {
-  if (typeof m['generateMetadata'] === 'function') {
-    return await m['generateMetadata']();
-  }
-  return {};
-});
+        const genKey = ['generate', 'Metadata'].join('');
+        if (typeof m[genKey] === 'function') return await m[genKey]();
+        return {};
+    });
     return comp;
 };
 ` : `
 const __nytlexLazy = (importFunc) => {
-    importFunc.__importFunc = importFunc; 
+    importFunc.__importFunc = importFunc;
     importFunc.getMetadata = () => importFunc().then(async (m) => {
-  if (typeof m['generateMetadata'] === 'function') {
-    return await m['generateMetadata']();
-  }
-  return {};
-});
+        const genKey = ['generate', 'Metadata'].join('');
+        if (typeof m[genKey] === 'function') return await m[genKey]();
+        return {};
+    });
     return importFunc;
 };
 `;
@@ -206,16 +205,13 @@ const __nytlexLazy = (importFunc) => {
                 })
                 .join('\n');
 
-            // REGISTRO DO LAYOUT ATUALIZADO: Removemos a obfuscação da key (que forçava tree-shaking) e expomos os metadados diretamente.
             const layoutRegistration = layout ? `
 window.__NYTLEX_LAYOUT__ = LayoutModule.default || LayoutModule;
-
-const meta = ["met", "adata"].join('')
-window.__NYTLEX_LAYOUT_METADATA__ = LayoutModule[meta] || {};
+const metaKey = ["met", "adata"].join('');
+window.__NYTLEX_LAYOUT_METADATA__ = LayoutModule[metaKey] || {};
 ` : `
 window.__NYTLEX_LAYOUT__ = null;
 window.__NYTLEX_LAYOUT_METADATA__ = null;
-window.__NYTLEX_LAYOUT_GENERATE_METADATA__ = null;
 `;
             const notFoundRegistration = notFound ? `window.__NYTLEX_NOT_FOUND__ = NotFoundComponent.default || NotFoundComponent;` : `window.__NYTLEX_NOT_FOUND__ = null;`;
 
@@ -249,7 +245,15 @@ window.__NYTLEX_DEFAULT_NOT_FOUND__ = DefaultNotFound;
 import '${entryClientPath}';
 `;
 
-            return { contents: code, loader: 'js', resolveDir: projectDir };
+            return {
+                contents: code,
+                loader: 'js',
+                resolveDir: projectDir,
+                // O SEGREDO 1: Se tocarmos no arquivo sentinelFile, o Esbuild quebra o cache desta
+                // entry virtual imediatamente e chama o onLoad pra pegar o código com a página nova!
+                watchFiles: [sentinelFile],
+                watchDirs: [path.join(projectDir, 'src', 'web')]
+            };
         });
     }
 });
@@ -308,8 +312,13 @@ const customPostCssPlugin = () => ({
             postcss = require('postcss');
             autoprefixer = require('autoprefixer');
             try { postcssLoadConfig = require('postcss-load-config'); } catch(e) {}
-            try { tailwindcss = require('@tailwindcss/postcss'); } catch (e) { tailwindcss = require('tailwindcss'); }
-        } catch (e) {}
+            try {
+                tailwindcss = require('@tailwindcss/postcss');
+            } catch (e) {
+                tailwindcss = require('tailwindcss');
+            }
+        } catch (e) {
+        }
 
         let processor = null;
         let initialized = false;
@@ -345,7 +354,10 @@ const customPostCssPlugin = () => ({
 
             if (processor) {
                 try {
-                    const result = await processor.process(cssContent, { from: args.path, to: args.path });
+                    const result = await processor.process(cssContent, {
+                        from: args.path,
+                        to: args.path
+                    });
                     cssContent = result.css;
                 } catch (err) {
                     Console.warn("Erro ao compilar Tailwind/PostCSS:", err.message);
@@ -479,7 +491,6 @@ async function watchWithChunks(nytlexOptions, outdir, hotReloadManager = null) {
     await cleanDirectoryExcept(outdir, excludedFiles);
     try {
         const config = await getFrameworkConfig(nytlexOptions, outdir, false, true);
-        let buildSeq = 0;
 
         config.sourcemap = true;
 
@@ -493,16 +504,63 @@ async function watchWithChunks(nytlexOptions, outdir, hotReloadManager = null) {
                 });
                 build.onEnd(result => {
                     if (result.errors.length > 0) {
-                        if (hotReloadManager) hotReloadManager.onBuildComplete(false, { message: result.errors[0].text });
-                        else Console.error("Build Error:", result.errors[0].text);
+                        const err = result.errors[0];
+
+                        const loc = err.location;
+                        let formattedMessage = err.text;
+
+                        if (loc) {
+                            const lineNum = loc.line.toString();
+                            const gutter = " ".repeat(Math.max(0, 6 - lineNum.length)) + lineNum + " │ ";
+                            const pointer = " ".repeat(6 + loc.column) + "~".repeat(loc.lineText ? loc.lineText.length : 1);
+
+                            formattedMessage = `${err.text}\n\n` +
+                                `    ${loc.file}:${loc.line}:${loc.column}:\n` +
+                                `      ${gutter}${loc.lineText}\n` +
+                                `      ${" ".repeat(gutter.length - 2)}╵ ${pointer}`;
+                        }
+
+                        const errorPayload = {
+                            message: err.text,
+                            plugin: (err.pluginName || err.plugin || 'nytlex-build').replace('esbuild', 'nytlex-build'),
+                            stack: formattedMessage
+                        };
+
+                        if (hotReloadManager) hotReloadManager.onBuildComplete(false, errorPayload);
+                        else Console.error("Build Error:", err.text);
                     } else {
-                        if (hotReloadManager) hotReloadManager.onBuildComplete(true, { buildId: ++buildSeq });
+                        if (hotReloadManager) hotReloadManager.onBuildComplete(true);
                     }
                 });
             }
         });
 
         const ctx = await esbuild.context(config);
+
+        // O SEGREDO 2: Um observador dedicado apenas a novas páginas ou páginas deletadas.
+        // Ele aguarda 250ms (para seu backend dar update nas rotas), toca no arquivo sentinel,
+        // quebra o cache do esbuild na marra e força a nova página pro Bundle em tempo recorde!
+        try {
+            const chokidar = require('chokidar');
+            const webDir = path.join(nytlexOptions.projectDir || process.cwd(), 'src', 'web');
+            const watcher = chokidar.watch(webDir, { ignoreInitial: true, depth: 10 });
+
+            let structTimer;
+            const handleStructuralChange = () => {
+                clearTimeout(structTimer);
+                structTimer = setTimeout(() => {
+                    const sentinelFile = path.join(nytlexOptions.projectDir || process.cwd(), '.nytlex', '.entry-sentinel');
+                    try { fs.writeFileSync(sentinelFile, Date.now().toString()); } catch(e) {}
+                    ctx.rebuild().catch(() => {});
+                }, 250);
+            };
+
+            watcher.on('add', handleStructuralChange);
+            watcher.on('unlink', handleStructuralChange);
+        } catch (err) {
+            // Ignora se o chokidar não estiver disponível neste escopo
+        }
+
         await ctx.watch();
         return ctx;
     } catch (error) {

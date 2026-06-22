@@ -325,10 +325,7 @@ class NytlexErrorModal extends HTMLElement {
                         </div>
 
                         <div class="nytlex-terminal-container">
-                            <div class="nytlex-terminal">
-                                ${parsedMessage}
-                                ${parsedStack ? `<div class="nytlex-stack">${parsedStack}</div>` : ''}
-                            </div>
+                            <div class="nytlex-terminal">${parsedMessage}${parsedStack ? `<div class="nytlex-stack">${parsedStack}</div>` : ''}</div>
                         </div>
 
                         <div class="nytlex-footer">

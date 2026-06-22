@@ -26,6 +26,30 @@ import path from 'path';
 
 // --- String/HTML Utilities ---
 
+
+
+export function withSilencedConsoleSync<T>(fn: () => T): T {
+    const originalLog = console.log;
+    const originalWarn = console.warn;
+    const originalError = console.error;
+    const originalInfo = console.info;
+
+    console.log = () => {};
+    console.warn = () => {};
+    console.error = () => {};
+    console.info = () => {};
+
+    try {
+        return fn();
+    } finally {
+        console.log = originalLog;
+        console.warn = originalWarn;
+        console.error = originalError;
+        console.info = originalInfo;
+    }
+}
+
+
 /**
  * Removes all script tags from HTML string
  */

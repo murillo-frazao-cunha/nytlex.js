@@ -245,7 +245,7 @@ program
         const hasValidBuild = hasValidProductionBuild(projectDir);
 
         if (!hasValidBuild || options.build) {
-            if (!hasValidBuild) {
+            if (!hasValidBuild && !options.build) {
 
                 const dim = Colors.Dim;
                 const bright = Colors.Bright;
@@ -305,7 +305,8 @@ program
             }
 
             // Inicia a aplicação sem rebuildar (já foi buildado acima)
-            initializeApp(options, false, true);
+            // Pass true para indicar que foi buildado agora
+            await initializeApp(options, false);
         } else {
             // Mostra informações da build existente
             const buildInfo = getBuildInfo(projectDir);
@@ -355,10 +356,9 @@ program
             }
 
             // Inicia a aplicação sem rebuildar
-            initializeApp(options, false, true);
+            await initializeApp(options, false);
         }
     });
-
 program
     .command('export')
     .description('Exports the application as static HTML to the "exported" folder.')

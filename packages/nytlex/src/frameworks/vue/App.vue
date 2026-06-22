@@ -1,19 +1,3 @@
-<!--
- * This file is part of the Nytlex.js Project.
- * Copyright (c) 2026 mfraz
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
--->
 <template>
   <component :is="resolvedLayout" v-if="resolvedLayout">
     <component
@@ -31,12 +15,13 @@
   />
 
   <nytlex-dev-badge
-      v-if="isDev"
+      v-if="isMounted && isDev"
       :has-build-error="!!buildError"
       @click-build-error="isErrorOpen = true"
   ></nytlex-dev-badge>
 
   <nytlex-error-modal
+      v-if="isMounted"
       .error="buildError"
       .isOpen="isErrorOpen"
       @close-modal="isErrorOpen = false"
@@ -63,11 +48,13 @@ const props = defineProps({
   routes: Array,
   initialComponentPath: String,
   initialParams: null,
-  layoutComponent: null
+  layoutComponent: null,
+  initialResolvedComponent: null // Prop adicionada para pre-load do SSR
 });
 
 // --- Estado ---
-const hmrTimestamp = ref(Date.now());
+const isMounted = ref(false);
+const hmrTimestamp = ref(0); // Mudado de Date.now() para 0 para evitar mismatch de SSR
 const currentPathKey = ref(window.location.pathname);
 const pendingHmrReady = ref(null);
 
@@ -90,8 +77,10 @@ watch(hmrTimestamp, async (timestamp) => {
 });
 
 // --- Roteamento ---
-const CurrentPageComponent = shallowRef(null);
-const params = ref({});
+// Inicia diretamente com o componente resolvido, sem tela branca!
+const CurrentPageComponent = shallowRef(props.initialResolvedComponent || props.componentMap[props.initialComponentPath] || null);
+const params = ref(props.initialParams || {});
+const isFirstRender = ref(true);
 
 const updateRoute = async () => {
   const currentPath = window.location.pathname.replace("index.html", '');
@@ -99,17 +88,33 @@ const updateRoute = async () => {
 
   const match = findRouteForPath(currentPath, props.routes);
   if (match) {
-    const component = props.componentMap[match.componentPath];
-    CurrentPageComponent.value = component;
+    const wrapper = props.componentMap[match.componentPath];
     params.value = match.params;
 
-    let pageTitle = null;
+    let componentToRender = wrapper;
 
+    if (isFirstRender.value) {
+      isFirstRender.value = false;
+      componentToRender = props.initialResolvedComponent || wrapper;
+      CurrentPageComponent.value = componentToRender;
+    } else {
+      // Na navegação via SPA, resolvemos o chunk antes de atualizar a tela
+      if (wrapper && typeof wrapper.__importFunc === 'function') {
+        try {
+          const m = await wrapper.__importFunc();
+          componentToRender = m.default || Object.values(m)[0] || m;
+        } catch (e) {
+          console.error('[Nytlex] Error fetching route chunk:', e);
+        }
+      }
+      CurrentPageComponent.value = componentToRender;
+    }
+
+    let pageTitle = null;
 
     // 1. Pega do Layout primeiro (Fallback base)
     const LayoutMetadata = window.__NYTLEX_LAYOUT_METADATA__ || {};
 
-    // 1. Pega do Layout primeiro (Fallback base)
     if (LayoutMetadata) {
       if (LayoutMetadata.title) {
         pageTitle = LayoutMetadata.title;
@@ -122,11 +127,10 @@ const updateRoute = async () => {
     }
 
     // 3. Sobrescreve com o dinâmico da rota atual (Prioridade máxima)
-    if (component) {
+    if (componentToRender) {
       try {
-        // Usa a nova função de metadata exposta no wrapper do Vatts.js
-        if (typeof component.getMetadata === 'function') {
-          const dynamicMetaRaw = await component.getMetadata();
+        if (typeof componentToRender.getMetadata === 'function') {
+          const dynamicMetaRaw = await componentToRender.getMetadata();
 
           let dynamicMeta = dynamicMetaRaw;
           if (typeof dynamicMetaRaw === 'function') {
@@ -151,9 +155,10 @@ const updateRoute = async () => {
     params.value = {};
   }
 };
+
 // --- Computed ---
 const resolvedContent = computed(() => {
-  if (!CurrentPageComponent.value) {
+  if (!CurrentPageComponent.value || props.initialComponentPath === '__404__') {
     const NotFoundComponent = window.__NYTLEX_NOT_FOUND__;
     if (NotFoundComponent) return NotFoundComponent;
 
@@ -180,6 +185,7 @@ const resolvedLayout = computed(() => props.layoutComponent || null);
 
 // --- Lifecycle ---
 onMounted(() => {
+  isMounted.value = true;
   updateRoute();
 
   // Usa as funções de eventos do Core

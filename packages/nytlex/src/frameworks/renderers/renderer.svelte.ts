@@ -27,13 +27,14 @@ import {
     generateMetaTags,
     extractComponentPreloads,
     getBuildAssets,
-    BuildAssets,
+    BuildAssets, withSilencedConsoleSync,
 } from '../../renderers/common.ts';
 
 // Importa os geradores de HTML Vanilla
 import { getBuildingScreenHtml } from '../themes/BuildingPage';
 import { getServerErrorHtml } from '../themes/ServerError';
 polyfillBrowserEnv();
+
 function buildSvelteShellDocument(options: {
     lang: string;
     title: string;
@@ -85,33 +86,36 @@ function buildSvelteShellDocument(options: {
 
 function compileSvelteComponentForSSR(componentPath: string): any {
     try {
-        const svelte = require('svelte/compiler');
-        const esbuild = require('esbuild');
-        const source = fs.readFileSync(componentPath, 'utf8');
+        return withSilencedConsoleSync(() => {
+            const svelte = require('svelte/compiler');
+            const esbuild = require('esbuild');
+            const source = fs.readFileSync(componentPath, 'utf8');
 
-        // Configuração do compilador para Svelte 5 SSR
-        const result = svelte.compile(source, {
-            generate: 'server',
-            filename: componentPath,
-            dev: false
-        });
-
-        if (result.js && result.js.code) {
-            const transformed = esbuild.transformSync(result.js.code, {
-                loader: 'js',
-                format: 'cjs',
-                target: 'node18' // Recomendado para Svelte 5
+            // Configuração do compilador para Svelte 5 SSR
+            const result = svelte.compile(source, {
+                generate: 'server',
+                filename: componentPath,
+                dev: false
             });
 
-            const mod = { exports: {} as any };
-            const componentRequire = createRequire(path.resolve(componentPath));
-            const runModule = new Function('module', 'exports', 'require', transformed.code);
-            runModule(mod, mod.exports, componentRequire);
+            if (result.js && result.js.code) {
+                const transformed = esbuild.transformSync(result.js.code, {
+                    loader: 'js',
+                    format: 'cjs',
+                    target: 'node18' // Recomendado para Svelte 5
+                });
 
-            return mod.exports.default || mod.exports;
-        }
+                const mod = { exports: {} as any };
+                const componentRequire = createRequire(path.resolve(componentPath));
+                const runModule = new Function('module', 'exports', 'require', transformed.code);
+                runModule(mod, mod.exports, componentRequire);
+
+                return mod.exports.default || mod.exports;
+            }
+            return null;
+        });
     } catch (e) {
-        console.warn(`[Nytlex] Failed to compile Svelte SSR ${componentPath}:`, e);
+        // Fallback silencioso (Console logs removidos a pedido do usuário)
         return null;
     }
 }
@@ -123,8 +127,10 @@ function ensureSvelteComponent(existingComponent: any, componentPath: string): a
     let component = existingComponent;
     if (!component && componentPath) {
         try {
-            const module = require(componentPath);
-            component = module.default || module;
+            return withSilencedConsoleSync(() => {
+                const module = require(componentPath);
+                return module.default || module;
+            });
         } catch (e) {
             return null;
         }
@@ -199,25 +205,28 @@ export async function renderSvelte({ req, res, route, params, allRoutes }: Rende
         // Ignora a renderização SSR caso esteja no modo export.
         if (process.env.NYTLEX_MODE !== 'export') {
             if (PageComponent) {
-                const { render } = require('svelte/server');
+                // Renderização silenciada para bloquear todos os logs do Svelte no SSR
+                withSilencedConsoleSync(() => {
+                    const { render } = require('svelte/server');
 
-                if (LayoutComponent) {
-                    const result = render(LayoutComponent, {
-                        props: {
-                            params,
-                            children: ($$payload: any) => {
-                                PageComponent($$payload, { params });
+                    if (LayoutComponent) {
+                        const result = render(LayoutComponent, {
+                            props: {
+                                params,
+                                children: ($$payload: any) => {
+                                    PageComponent($$payload, { params });
+                                }
                             }
-                        }
-                    });
+                        });
 
-                    bodyInnerHtml = result.body || result.html || '';
-                    svelteHeadHtml = result.head || '';
-                } else {
-                    const result = render(PageComponent, { props: { params } });
-                    bodyInnerHtml = result.body || result.html || '';
-                    svelteHeadHtml = result.head || '';
-                }
+                        bodyInnerHtml = result.body || result.html || '';
+                        svelteHeadHtml = result.head || '';
+                    } else {
+                        const result = render(PageComponent, { props: { params } });
+                        bodyInnerHtml = result.body || result.html || '';
+                        svelteHeadHtml = result.head || '';
+                    }
+                });
             } else {
                 bodyInnerHtml = '<div>Page not found</div>';
             }
@@ -243,9 +252,7 @@ export async function renderSvelte({ req, res, route, params, allRoutes }: Rende
         res.end(finalHtml);
 
     } catch (err) {
-        if (!isProduction) console.error("Critical Svelte SSR Render Error:", err);
-
-        // Fallback para o ServerError Vanilla
+        // Fallback para o ServerError Vanilla sem console.error
         let errorHtml = getServerErrorHtml({
             error: err,
             title: 'Critical SSR Render Error',

@@ -32,8 +32,10 @@ import {
     getBuildAssets,
     extractComponentPreloads,
     BuildAssets,
+    withSilencedConsoleSync,
 } from '../../renderers/common.ts';
 polyfillBrowserEnv();
+
 // Importa os geradores de HTML Vanilla
 import { getBuildingScreenHtml } from '../themes/BuildingPage';
 import { getServerErrorHtml } from '../themes/ServerError';
@@ -191,7 +193,6 @@ interface RenderOptions {
 
 export async function render({ req, res, route, params, allRoutes }: RenderOptions): Promise<void> {
 
-
     const { generateMetadata } = route;
     const isProduction = !(req as any).hwebDev;
     const hotReloadManager = (req as any).hotReloadManager;
@@ -217,8 +218,11 @@ export async function render({ req, res, route, params, allRoutes }: RenderOptio
 
         if (layoutInfo) {
             try {
-                const layoutModule = requireWithoutStyles<any>(path.resolve(process.cwd(), layoutInfo.componentPath));
-                LayoutComponent = layoutModule.default;
+                // Esse pode usar a versão Sync pois o require é sincronizado no Node.js
+                withSilencedConsoleSync(() => {
+                    const layoutModule = requireWithoutStyles<any>(path.resolve(process.cwd(), layoutInfo.componentPath));
+                    LayoutComponent = layoutModule.default;
+                });
             } catch (e) {
                 console.error("Error loading layout component for SSR:", e);
             }
@@ -268,7 +272,6 @@ export async function render({ req, res, route, params, allRoutes }: RenderOptio
         }).join('\n');
 
         // Ignora a renderização SSR caso esteja no modo export.
-        // O React fará o render inteiro no lado do cliente (Client-Side Rendering)
         if (process.env.NYTLEX_MODE === 'export') {
             const scriptsHtml = assets.scripts.map(src => `<script type="module" src="${src}"></script>`).join('\n');
             const finalHtml = buildShellHtml({
@@ -294,26 +297,79 @@ export async function render({ req, res, route, params, allRoutes }: RenderOptio
             AppTree = <LayoutComponent>{AppTree}</LayoutComponent>;
         }
 
-        // 6. Streaming React
+        // 6. Streaming React Assíncrono com o Console Isolado
         return new Promise((resolve) => {
             let didError = false;
             let firstError: unknown = null;
+            let stream: any;
 
-            const stream = renderToPipeableStream(
-                <ServerRoot
-                    lang={htmlLang}
-                    title={metadata.title || 'Nytlex.js'}
-                    metaTagsHtml={metaTagsHtml}
-                    stylesHtml={stylesHtml}
-                    initialDataScript={`/* Data Injection */`}
-                    hotReloadScript={hotReloadScript}
-                >
-                    {AppTree}
-                </ServerRoot>,
-                {
-                    bootstrapModules: assets!.scripts,
-                    onAllReady() {
-                        if (didError) {
+            // Guardamos os consoles originais antes do stream do React iniciar
+            const originalLog = console.log;
+            const originalWarn = console.warn;
+            const originalError = console.error;
+            const originalInfo = console.info;
+
+            let consoleRestored = false;
+            const restoreConsole = () => {
+                if (consoleRestored) return;
+                consoleRestored = true;
+                console.log = originalLog;
+                console.warn = originalWarn;
+                console.error = originalError;
+                console.info = originalInfo;
+            };
+
+            // Amordaçamos o console globalmente.
+            // O React roda as tasks assíncronas do lado do servidor aqui.
+            console.log = () => {};
+            console.warn = () => {};
+            console.error = () => {};
+            console.info = () => {};
+
+            try {
+                stream = renderToPipeableStream(
+                    <ServerRoot
+                        lang={htmlLang}
+                        title={metadata.title || 'Nytlex.js'}
+                        metaTagsHtml={metaTagsHtml}
+                        stylesHtml={stylesHtml}
+                        initialDataScript={`/* Data Injection */`}
+                        hotReloadScript={hotReloadScript}
+                    >
+                        {AppTree}
+                    </ServerRoot>,
+                    {
+                        bootstrapModules: assets!.scripts,
+                        onAllReady() {
+                            // AQUI É ONDE O REACT TERMINA ASSINCRONAMENTE O TRABALHO
+                            restoreConsole();
+
+                            if (didError) {
+                                stream.abort();
+                                sendReactSsrFallback({
+                                    req,
+                                    res,
+                                    isProduction,
+                                    error: firstError || new Error('SSR error'),
+                                    assets: assets!,
+                                    lang: htmlLang,
+                                    title: metadata.title || 'Nytlex.js',
+                                    metaTagsHtml,
+                                    stylesHtml,
+                                    hotReloadScript,
+                                }).then(resolve as any);
+                                return;
+                            }
+
+                            res.setHeader('Content-Type', 'text/html; charset=utf-8');
+                            stream.pipe(res);
+                            resolve();
+                        },
+                        onShellError(error: any) {
+                            restoreConsole(); // Restaura em caso de falha gravíssima na base da app
+
+                            firstError ||= error;
+                            didError = true;
                             stream.abort();
                             sendReactSsrFallback({
                                 req,
@@ -327,26 +383,22 @@ export async function render({ req, res, route, params, allRoutes }: RenderOptio
                                 stylesHtml,
                                 hotReloadScript,
                             }).then(resolve as any);
-                            return;
-                        }
-
-                        res.setHeader('Content-Type', 'text/html; charset=utf-8');
-                        stream.pipe(res);
-                        resolve();
-                    },
-                    onShellError(error: any) {
-                        firstError ||= error;
-                        didError = true;
-                    },
-                    onError(error: any) {
-                        firstError ||= error;
-                        didError = true;
-                        if (!isProduction) {
-                            console.error('Streaming Error:', error);
-                        }
-                    },
-                }
-            );
+                        },
+                        onError(error: any) {
+                            firstError ||= error;
+                            didError = true;
+                            if (!isProduction) {
+                                // Usa o originalError explicitamente para não perdermos o erro do log
+                                originalError('Streaming Error:', error);
+                            }
+                        },
+                    }
+                );
+            } catch (e) {
+                // Se der algum erro catastrófico logo na chamada, restaura para não vazar a mordaça
+                restoreConsole();
+                throw e;
+            }
         });
     } catch (err) {
         if (!assets) {

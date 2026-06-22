@@ -26,7 +26,7 @@ import {
     generateMetaTags,
     extractComponentPreloads,
     getBuildAssets,
-    BuildAssets,
+    BuildAssets, withSilencedConsoleSync,
 } from '../../renderers/common.ts';
 
 import * as vue from "vue";
@@ -36,6 +36,30 @@ import * as vueServerRenderer from "@vue/server-renderer";
 import { getBuildingScreenHtml } from '../themes/BuildingPage';
 import { getServerErrorHtml } from '../themes/ServerError';
 polyfillBrowserEnv();
+
+
+
+async function withSilencedConsoleAsync<T>(fn: () => Promise<T>): Promise<T> {
+    const originalLog = console.log;
+    const originalWarn = console.warn;
+    const originalError = console.error;
+    const originalInfo = console.info;
+
+    console.log = () => {};
+    console.warn = () => {};
+    console.error = () => {};
+    console.info = () => {};
+
+    try {
+        return await fn();
+    } finally {
+        console.log = originalLog;
+        console.warn = originalWarn;
+        console.error = originalError;
+        console.info = originalInfo;
+    }
+}
+
 function buildVueShellDocument(options: {
     lang: string;
     title: string;
@@ -83,34 +107,41 @@ function ensureVueComponent(existingComponent: any, componentPath: string): any 
     let component = existingComponent;
     if (!component && componentPath) {
         try {
-            const module = require(componentPath);
-            component = module.default || module;
+            // Silenciamos o require do componente inicial
+            component = withSilencedConsoleSync(() => {
+                const module = require(componentPath);
+                return module.default || module;
+            });
         } catch (e) { return null; }
     }
     if (!component) return null;
 
     if (typeof component === 'object' && !component.render && !component.ssrRender && componentPath && componentPath.endsWith('.vue')) {
         try {
-            const sfc = require('vue/compiler-sfc');
-            const esbuild = require('esbuild');
-            const source = fs.readFileSync(componentPath, 'utf8');
-            const { descriptor } = sfc.parse(source, { filename: componentPath });
-            if (descriptor.template) {
-                const templateResult = sfc.compileTemplate({
-                    source: descriptor.template.content,
-                    filename: componentPath,
-                    id: componentPath,
-                    ssr: true
-                });
-                if (templateResult.code) {
-                    const transformed = esbuild.transformSync(templateResult.code, { loader: 'js', format: 'cjs', target: 'node16' });
-                    const mod = { exports: {} as any };
-                    const runModule = new Function('module', 'exports', 'require', transformed.code);
-                    runModule(mod, mod.exports, require);
-                    if (mod.exports.ssrRender) component.ssrRender = mod.exports.ssrRender;
+            withSilencedConsoleSync(() => {
+                const sfc = require('vue/compiler-sfc');
+                const esbuild = require('esbuild');
+                const source = fs.readFileSync(componentPath, 'utf8');
+                const { descriptor } = sfc.parse(source, { filename: componentPath });
+                if (descriptor.template) {
+                    const templateResult = sfc.compileTemplate({
+                        source: descriptor.template.content,
+                        filename: componentPath,
+                        id: componentPath,
+                        ssr: true
+                    });
+                    if (templateResult.code) {
+                        const transformed = esbuild.transformSync(templateResult.code, { loader: 'js', format: 'cjs', target: 'node16' });
+                        const mod = { exports: {} as any };
+                        const runModule = new Function('module', 'exports', 'require', transformed.code);
+                        runModule(mod, mod.exports, require);
+                        if (mod.exports.ssrRender) component.ssrRender = mod.exports.ssrRender;
+                    }
                 }
-            }
-        } catch (e) { console.warn(`Failed to compile ${componentPath}:`, e); }
+            });
+        } catch (e) {
+            // Falhas silenciadas
+        }
     }
     return component;
 }
@@ -125,7 +156,8 @@ interface RenderOptions {
 
 export async function renderVue({ req, res, route, params, allRoutes }: RenderOptions): Promise<void> {
 
-    const { createSSRApp, h } = vue;
+    // EXTRAÍMOS FRAGMENT E COMMENT VNODE NATIVOS DO VUE
+    const { createSSRApp, h, Fragment, createCommentVNode } = vue;
     const { renderToString } = vueServerRenderer as any;
     const { generateMetadata } = route;
     const isProduction = !(req as any).hwebDev;
@@ -182,13 +214,24 @@ export async function renderVue({ req, res, route, params, allRoutes }: RenderOp
                 setup() {
                     return () => {
                         const pageNode = PageComponent ? h(PageComponent as any, { params }) : h('div', 'Page not found');
-                        return LayoutComponent ? h(LayoutComponent, null, { default: () => pageNode }) : pageNode;
+                        const mainNode = LayoutComponent ? h(LayoutComponent, null, { default: () => pageNode }) : pageNode;
+
+                        // A MÁGICA: Retornamos um Fragmento imitando o App.vue
+                        // Injetamos os nós de comentários que simulam os componentes Web (DevBadge e ErrorModal)
+                        // que possuem v-if="false" no lado do servidor/primeiro render.
+                        return h(Fragment, null, [
+                            mainNode,
+                            createCommentVNode("v-if", true),
+                            createCommentVNode("v-if", true)
+                        ]);
                     };
                 }
             };
 
             const app = createSSRApp(RootComponent);
-            bodyInnerHtml = await renderToString(app);
+
+            // Envolvemos a renderização assíncrona do SSR para silenciar qualquer log durante a montagem virtual
+            bodyInnerHtml = await withSilencedConsoleAsync(() => renderToString(app));
         }
 
         const finalHtml = buildVueShellDocument({
@@ -209,7 +252,8 @@ export async function renderVue({ req, res, route, params, allRoutes }: RenderOp
         res.end(finalHtml);
 
     } catch (err) {
-        if (!isProduction) console.error("Critical Vue Render Error:", err);
+        // Removemos o console.error original daqui para evitar ruído.
+        // O erro já será mostrado formatado no front-end.
 
         // Fallback para o ServerError Vanilla
         let errorHtml = getServerErrorHtml({

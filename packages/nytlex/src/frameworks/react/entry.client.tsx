@@ -15,7 +15,7 @@
  * limitations under the License.
  */
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { createRoot, Root } from 'react-dom/client';
+import { createRoot, hydrateRoot, Root } from 'react-dom/client';
 import { router } from '../../client/clientRouter.ts';
 import type { Metadata } from "../../types.ts";
 
@@ -45,10 +45,15 @@ interface AppProps {
     initialComponentPath: string;
     initialParams: any;
     layoutComponent?: any;
+    initialResolvedComponent?: any;
 }
 
-function App({ componentMap, routes, initialComponentPath, initialParams, layoutComponent }: AppProps) {
-    const [hmrTimestamp, setHmrTimestamp] = useState(Date.now());
+function App({ componentMap, routes, initialComponentPath, initialParams, layoutComponent, initialResolvedComponent }: AppProps) {
+    // 1. Garante que ferramentas puramente de frontend só apareçam APÓS a hidratação
+    const [isMounted, setIsMounted] = useState(false);
+
+    // 2. Trocado Date.now() por 0 inicial para não causar mismatches na key do React
+    const [hmrTimestamp, setHmrTimestamp] = useState(0);
     const pendingHmrReadyRef = useRef<{ file: string | null; timestamp: number } | null>(null);
 
     const [buildError, setBuildError] = useState<NytlexBuildError | null>(() => {
@@ -60,6 +65,10 @@ function App({ componentMap, routes, initialComponentPath, initialParams, layout
 
     const devBadgeRef = useRef<HTMLElement>(null);
     const errorModalRef = useRef<HTMLElement>(null);
+
+    useEffect(() => {
+        setIsMounted(true);
+    }, []);
 
     // Setup de eventos compartilhados
     useEffect(() => {
@@ -86,8 +95,9 @@ function App({ componentMap, routes, initialComponentPath, initialParams, layout
 
     const handleCopyLog = useCallback(() => copyBuildError(buildError), [buildError]);
 
-    // Sincroniza refs dos Web Components
+    // Sincroniza refs dos Web Components (apenas após o mount)
     useEffect(() => {
+        if (!isMounted) return;
         const badge = devBadgeRef.current;
         const modal = errorModalRef.current as any;
 
@@ -96,9 +106,10 @@ function App({ componentMap, routes, initialComponentPath, initialParams, layout
             modal.error = buildError;
             modal.isOpen = isErrorOpen;
         }
-    }, [buildError, isErrorOpen]);
+    }, [buildError, isErrorOpen, isMounted]);
 
     useEffect(() => {
+        if (!isMounted) return;
         const badge = devBadgeRef.current;
         const modal = errorModalRef.current;
 
@@ -118,16 +129,12 @@ function App({ componentMap, routes, initialComponentPath, initialParams, layout
                 modal.removeEventListener('copy-log', handleCopyLog);
             }
         };
-    }, [handleCopyLog]);
+    }, [handleCopyLog, isMounted]);
 
     // Roteamento
     const getMatch = useCallback((path: string) => findRouteForPath(path, routes), [routes]);
 
-    const [CurrentPageComponent, setCurrentPageComponent] = useState(() => {
-        const currentPath = window.location.pathname.replace("index.html", '');
-        const match = getMatch(currentPath);
-        return match ? componentMap[match.componentPath] : null;
-    });
+    const [CurrentPageComponent, setCurrentPageComponent] = useState(() => initialResolvedComponent);
 
     const [params, setParams] = useState(() => {
         const currentPath = window.location.pathname.replace("index.html", '');
@@ -135,38 +142,51 @@ function App({ componentMap, routes, initialComponentPath, initialParams, layout
         return match ? match.params : {};
     });
 
+    const isFirstRender = useRef(true);
+
     const updateRoute = useCallback(async () => {
         const currentPath = router.pathname.replace("index.html", '');
         const match = getMatch(currentPath);
 
         if (match) {
-            const component = componentMap[match.componentPath];
-            setCurrentPageComponent(() => component);
+            const wrapper = componentMap[match.componentPath];
             setParams(match.params);
 
-            let pageTitle = null;
+            let componentToRender = wrapper;
 
-            // Puxando a nova abstração global injetada pelo Esbuild
+            if (isFirstRender.current) {
+                isFirstRender.current = false;
+                componentToRender = initialResolvedComponent || wrapper;
+                setCurrentPageComponent(() => componentToRender);
+            } else {
+                if (wrapper && typeof wrapper.__importFunc === 'function') {
+                    try {
+                        const m = await wrapper.__importFunc();
+                        componentToRender = m.default || Object.values(m)[0] || m;
+                    } catch (e) {
+                        console.error('[Nytlex] Error fetching route chunk:', e);
+                    }
+                }
+                setCurrentPageComponent(() => componentToRender);
+            }
+
+            let pageTitle = null;
             const LayoutMetadata = window.__NYTLEX_LAYOUT_METADATA__ || {};
 
-            // 1. Pega do Layout primeiro (Fallback base)
             if (LayoutMetadata) {
-                 if (LayoutMetadata.title) {
+                if (LayoutMetadata.title) {
                     pageTitle = LayoutMetadata.title;
                 }
             }
 
-            // 2. Sobrescreve com o estático da rota atual
             if (match.metadata?.title) {
                 pageTitle = match.metadata.title;
             }
 
-            // 3. Sobrescreve com o dinâmico da rota atual (Prioridade máxima)
-            if (component) {
+            if (componentToRender) {
                 try {
-                    // Usa a nova função de metadata exposta no wrapper do Vatts.js
-                    if (typeof component.getMetadata === 'function') {
-                        const dynamicMetaRaw = await component.getMetadata();
+                    if (typeof componentToRender.getMetadata === 'function') {
+                        const dynamicMetaRaw = await componentToRender.getMetadata();
 
                         let dynamicMeta = dynamicMetaRaw;
                         if (typeof dynamicMetaRaw === 'function') {
@@ -182,7 +202,6 @@ function App({ componentMap, routes, initialComponentPath, initialParams, layout
                 }
             }
 
-            // 4. Atualiza o título se encontrou algum
             if (pageTitle) {
                 updateDocumentTitle(pageTitle);
             }
@@ -190,12 +209,12 @@ function App({ componentMap, routes, initialComponentPath, initialParams, layout
             setCurrentPageComponent(null);
             setParams({});
         }
-// Removi o layoutComponent das dependências, já que agora usamos a global do Window
-    }, [router.pathname, getMatch, componentMap]); // <- Note que adicionei o layoutComponent aqui nas dependências
+    }, [router.pathname, getMatch, componentMap, initialResolvedComponent]);
 
     useEffect(() => {
         updateRoute();
     }, [updateRoute]);
+
     useEffect(() => {
         const handlePopState = () => updateRoute();
         window.addEventListener('popstate', handlePopState);
@@ -232,19 +251,19 @@ function App({ componentMap, routes, initialComponentPath, initialParams, layout
     return (
         <>
             {resolvedContent}
-            {process.env.NODE_ENV !== 'production' ? (
+            {isMounted && process.env.NODE_ENV !== 'production' ? (
                 <nytlex-dev-badge ref={devBadgeRef}></nytlex-dev-badge>
             ) : null}
-            <nytlex-error-modal ref={errorModalRef}></nytlex-error-modal>
+            {isMounted ? (
+                <nytlex-error-modal ref={errorModalRef}></nytlex-error-modal>
+            ) : null}
         </>
     );
 }
 
 // --- Inicialização do Cliente ---
-function initializeClient() {
+async function initializeClient() {
     try {
-        // Resolve a rota e params inicial calculando diretamente no lado do cliente
-        // a partir da injeção do esbuild!
         const routes = (window as any).__NYTLEX_ROUTES__ || [];
         const currentPath = window.location.pathname.replace("index.html", '');
         const match = findRouteForPath(currentPath, routes);
@@ -262,6 +281,32 @@ function initializeClient() {
         const container = document.getElementById('root');
         if (!container) throw new Error('Container #root not found.');
 
+        let resolvedInitialComponent = null;
+        if (initialComponentPath !== '__404__') {
+            const wrapper = componentMap[initialComponentPath];
+            if (wrapper && typeof wrapper.__importFunc === 'function') {
+                try {
+                    const m = await wrapper.__importFunc();
+                    resolvedInitialComponent = m.default || Object.values(m)[0] || m;
+                } catch (e) {
+                    console.error('[Nytlex] Error preloading initial component:', e);
+                }
+            } else {
+                resolvedInitialComponent = wrapper;
+            }
+        }
+
+        const appElement = (
+            <App
+                componentMap={componentMap}
+                routes={routes}
+                initialComponentPath={initialComponentPath}
+                initialParams={initialParams}
+                layoutComponent={(window as any).__NYTLEX_LAYOUT__}
+                initialResolvedComponent={resolvedInitialComponent}
+            />
+        );
+
         if (window.__NYTLEX_ROOT__) {
             console.log('[Nytlex] ♻️ HMR detectado: Limpando a root do React...');
             try {
@@ -270,20 +315,18 @@ function initializeClient() {
             } catch (e) {
                 console.warn('[Nytlex] ⚠️ Warning during unmount:', e);
             }
+            const root = createRoot(container);
+            window.__NYTLEX_ROOT__ = root;
+            root.render(appElement);
+        } else {
+            if (container.hasChildNodes()) {
+                window.__NYTLEX_ROOT__ = hydrateRoot(container, appElement);
+            } else {
+                const root = createRoot(container);
+                window.__NYTLEX_ROOT__ = root;
+                root.render(appElement);
+            }
         }
-
-        const root = createRoot(container);
-        window.__NYTLEX_ROOT__ = root;
-
-        root.render(
-            <App
-                componentMap={componentMap}
-                routes={routes}
-                initialComponentPath={initialComponentPath}
-                initialParams={initialParams}
-                layoutComponent={(window as any).__NYTLEX_LAYOUT__}
-            />
-        );
 
     } catch (error: any) {
         renderCriticalError(error, 'React');

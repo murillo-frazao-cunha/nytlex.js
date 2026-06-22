@@ -206,13 +206,25 @@ const customVuePlugin = (opts = {}) => {
                 const encPath = args.path.replace(/\\/g, "\\\\");
                 const source = await fs.promises.readFile(args.path, 'utf8');
                 const filename = path.relative(process.cwd(), args.path);
+                // Corrige o bug de duplicação do caminho ao forçar o caminho raiz a partir do root
+                const sourceMapPath = "/" + filename.replace(/\\/g, '/');
 
                 const id = !opts.scopeId || opts.scopeId === "hash"
                     ? crypto.createHash("md5").update(filename).digest().toString("hex").substring(0, 8)
                     : random(4).toString("hex");
 
                 const { descriptor } = sfc.parse(source, { filename });
-                const script = (descriptor.script || descriptor.scriptSetup) ? sfc.compileScript(descriptor, { id, fs: ts.sys }) : undefined;
+
+                // CORREÇÃO APLICADA: Passando templateOptions para o compileScript ter ciência dos elementos customizados
+                const script = (descriptor.script || descriptor.scriptSetup) ? sfc.compileScript(descriptor, {
+                    id,
+                    fs: ts.sys,
+                    sourceMap: !!buildOpts.sourcemap,
+                    templateOptions: {
+                        compilerOptions: opts.compilerOptions
+                    }
+                }) : undefined;
+
                 const dataId = "data-v-" + id;
 
                 let code = "";
@@ -245,21 +257,37 @@ const customVuePlugin = (opts = {}) => {
 
                 code += "export default script;";
 
+                // INJEÇÃO DO SOURCE MAP PARA O "CÓDIGO COLA"
+                if (buildOpts.sourcemap) {
+                    const lines = code.split('\n').length;
+                    const map = {
+                        version: 3,
+                        sources: [sourceMapPath], // Usa o sourceMapPath com a / no começo
+                        sourcesContent: [source],
+                        // Mapeia todas as linhas geradas para o topo do arquivo original
+                        mappings: Array(lines).fill('AAAA').join(';'),
+                    };
+                    const mapBase64 = Buffer.from(JSON.stringify(map)).toString("base64");
+                    code += `\n//# sourceMappingURL=data:application/json;charset=utf-8;base64,${mapBase64}`;
+                }
+
                 return {
                     contents: code,
                     resolveDir: path.dirname(args.path),
-                    pluginData: { descriptor, id: dataId, script },
+                    pluginData: { descriptor, id: dataId, script, source, sourceMapPath },
                     watchFiles: [ args.path ]
                 };
             }));
 
             build.onLoad({ filter: /.*/, namespace: "sfc-script" }, (args) => cache.get([args.path, args.namespace], async () => {
-                const { script } = args.pluginData;
+                const { script, source, sourceMapPath } = args.pluginData;
                 if (script) {
                     let code = script.content;
                     if (buildOpts.sourcemap && script.map) {
+                        script.map.sources = [sourceMapPath]; // Usa o sourceMapPath absoluto
+                        script.map.sourcesContent = [source];
                         const sourceMap = Buffer.from(JSON.stringify(script.map)).toString("base64");
-                        code += "\n\n//@ sourceMappingURL=data:application/json;charset=utf-8;base64," + sourceMap;
+                        code += "\n//# sourceMappingURL=data:application/json;charset=utf-8;base64," + sourceMap;
                     }
                     return {
                         contents: code,
@@ -270,7 +298,7 @@ const customVuePlugin = (opts = {}) => {
             }));
 
             build.onLoad({ filter: /.*/, namespace: "sfc-template" }, (args) => cache.get([args.path, args.namespace], async () => {
-                const { descriptor, id, script } = args.pluginData;
+                const { descriptor, id, script, source: rawSource, sourceMapPath } = args.pluginData;
                 if (!descriptor.template) {
                     return { loader: "js", contents: "" };
                 }
@@ -291,6 +319,7 @@ const customVuePlugin = (opts = {}) => {
                     ssr: opts.renderSSR,
                     ssrCssVars: [],
                     isProd: (process.env.NODE_ENV === "production") || buildOpts.minify,
+                    sourceMap: !!buildOpts.sourcemap,
                     compilerOptions: {
                         inSSR: opts.renderSSR,
                         directiveTransforms: transforms,
@@ -313,8 +342,16 @@ const customVuePlugin = (opts = {}) => {
                     };
                 }
 
+                let code = result.code;
+                if (buildOpts.sourcemap && result.map) {
+                    result.map.sources = [sourceMapPath]; // Usa o sourceMapPath absoluto
+                    result.map.sourcesContent = [rawSource];
+                    const sourceMap = Buffer.from(JSON.stringify(result.map)).toString("base64");
+                    code += "\n//# sourceMappingURL=data:application/json;charset=utf-8;base64," + sourceMap;
+                }
+
                 return {
-                    contents: result.code,
+                    contents: code,
                     warnings: result.tips.map(o => ({ text: o })),
                     loader: "ts",
                     resolveDir: path.dirname(args.path),
@@ -393,8 +430,9 @@ const customVuePlugin = (opts = {}) => {
 async function createVueConfig(entryPoint, outdir, isProduction, { prePlugins = [], postPlugins = [], isWatch = false } = {}) {
     const mode = process.env.NYTLEX_MODE || 'build';
 
+    // CORREÇÃO APLICADA: isCustomElement agnóstico a Case Sensitivity (usa toLowerCase)
     const vueCompilerOptions = {
-        isCustomElement: (tag) => tag.startsWith('nytlex-')
+        isCustomElement: (tag) => tag.toLowerCase().includes('nytlex-')
     };
 
     // Usando o nosso próprio plugin customizado que corrige os exports nomeados e suporta as tags personalizadas
@@ -414,6 +452,11 @@ async function createVueConfig(entryPoint, outdir, isProduction, { prePlugins = 
         splitting: true,
         chunkNames: 'chunks/[name]-[hash]',
         assetNames: 'assets/[name]-[hash]',
+
+        treeShaking: true,
+        drop: isProduction ? ['debugger'] : [],
+        pure: [],
+        legalComments: isProduction ? 'none' : 'inline',
 
         minify: isProduction,
         sourcemap: !isProduction && !isWatch,
