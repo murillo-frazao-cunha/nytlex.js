@@ -16,11 +16,11 @@
  */
 
 // 1. IMPORTANTE: O Runtime do React Refresh precisa ser injetado ANTES do react-dom
-import RefreshRuntime from 'react-refresh/runtime';
 
 if (process.env.NODE_ENV !== 'production' && typeof window !== 'undefined') {
     // PREVINE QUE O HMR REGISTRE O EVENTO MÚLTIPLAS VEZES CASO O ENTRY RE-EXECUTE
     if (!(window as any).__NYTLEX_HMR_SETUP__) {
+        const RefreshRuntime = require('react-refresh/runtime');
         (window as any).__NYTLEX_HMR_SETUP__ = true;
 
         // Injeta o hook global que o plugin do esbuild vai usar para registrar os componentes
