@@ -411,7 +411,8 @@ async function getFrameworkConfig(nytlexOptions, outdir, isProduction, isWatch =
         smartSvgPlugin()
     ];
 
-    const pluginConfig = { prePlugins, postPlugins, isWatch };
+    // Aqui passamos isHMR = isWatch pro builder do framework específico saber que deve injetar os plugins de fast-refresh futuramente
+    const pluginConfig = { prePlugins, postPlugins, isWatch, isHMR: isWatch };
     const entryPoint = 'virtual:nytlex-entry';
 
     let config;
@@ -432,6 +433,11 @@ async function getFrameworkConfig(nytlexOptions, outdir, isProduction, isWatch =
     config.assetNames = 'assets/[name]-[hash]';
     config.treeShaking = true;
     config.legalComments = 'none';
+
+    // Essencial para o Fast-Refresh/HMR: O esbuild precisa soltar o metafile para mapearmos o que mudou
+    if (isWatch) {
+        config.metafile = true;
+    }
 
     config.define = {
         ...(config.define || {}),
@@ -529,7 +535,8 @@ async function watchWithChunks(nytlexOptions, outdir, hotReloadManager = null) {
                         if (hotReloadManager) hotReloadManager.onBuildComplete(false, errorPayload);
                         else Console.error("Build Error:", err.text);
                     } else {
-                        if (hotReloadManager) hotReloadManager.onBuildComplete(true);
+                        // Passamos o result inteiro aqui, que agora contém o metafile com as informações de HMR
+                        if (hotReloadManager) hotReloadManager.onBuildComplete(true, null, result);
                     }
                 });
             }

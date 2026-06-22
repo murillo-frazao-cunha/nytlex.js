@@ -14,6 +14,76 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
+// 1. IMPORTANTE: O Runtime do React Refresh precisa ser injetado ANTES do react-dom
+import RefreshRuntime from 'react-refresh/runtime';
+
+if (process.env.NODE_ENV !== 'production' && typeof window !== 'undefined') {
+    // PREVINE QUE O HMR REGISTRE O EVENTO MÚLTIPLAS VEZES CASO O ENTRY RE-EXECUTE
+    if (!(window as any).__NYTLEX_HMR_SETUP__) {
+        (window as any).__NYTLEX_HMR_SETUP__ = true;
+
+        // Injeta o hook global que o plugin do esbuild vai usar para registrar os componentes
+        RefreshRuntime.injectIntoGlobalHook(window);
+
+        // ATENÇÃO: As funções precisam ser reais. O plugin do Esbuild precisa disso para registrar o componente na memória!
+        (window as any).$RefreshRuntime$ = RefreshRuntime;
+        (window as any).$RefreshReg$ = (type: any, id: string) => {
+            RefreshRuntime.register(type, id);
+        };
+        (window as any).$RefreshSig$ = RefreshRuntime.createSignatureFunctionForTransform;
+
+        // Escutando o nosso novo evento maroto de HMR
+        window.addEventListener('nytlex:hmr-update', async (e: any) => {
+            console.log('[Nytlex] ⚛️ HMR Recebido! Sincronizando módulos...');
+            try {
+                const files = e.detail?.files || [];
+                // Filtra os arquivos de script modificados
+                const jsFiles = files.filter((f: string) => f.endsWith('.js') || f.endsWith('.jsx') || f.endsWith('.mjs') || f.endsWith('.ts') || f.endsWith('.tsx'));
+
+                if (jsFiles.length > 0) {
+                    for (const file of jsFiles) {
+                        let publicPath = '';
+                        const parts = file.replace(/\\/g, '/').split('/');
+                        const rootDirs = ['chunks', 'assets', 'pages'];
+                        const idx = parts.findIndex((p: string) => rootDirs.includes(p) || p.includes('entry.client'));
+
+                        if (idx !== -1) {
+                            publicPath = '/_nytlex/' + parts.slice(idx).join('/');
+                        } else {
+                            // Fallback, pega o nome final
+                            publicPath = '/_nytlex/' + parts[parts.length - 1];
+                        }
+
+
+                        try {
+                            // O import() força o navegador a buscar e EXECUTAR a nova versão do arquivo.
+                            // Ao executar, o plugin babel/esbuild registra a nova versão dos componentes.
+                            await import(publicPath + '?hmr=' + Date.now());
+                        } catch (err) {
+                            console.warn(`[Nytlex] Falha ao injetar ${publicPath}`, err);
+                        }
+                    }
+                }
+
+                // AGORA SIM! Com o código novo em memória e as funções de cache salvas, o React faz o patch na tela sem piscar!
+                RefreshRuntime.performReactRefresh();
+
+                // Força a atualização da rota para pegar os novos componentes do window.__NYTLEX_COMPONENTS__
+                window.dispatchEvent(new CustomEvent('nytlex:react-hmr-swap'));
+
+                // Avisa o DevBadge para parar de girar (retornar ao estado idle)
+                window.dispatchEvent(new CustomEvent('nytlex:hotreload', {
+                    detail: { state: 'idle', payload: { success: true }, ts: Date.now() }
+                }));
+
+            } catch (err) {
+                console.warn('[Nytlex] Fast-Refresh falhou, forçando reload da página...', err);
+                window.location.reload();
+            }
+        });
+    }
+}
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { createRoot, hydrateRoot, Root } from 'react-dom/client';
 import { router } from '../../client/clientRouter.ts';
@@ -149,7 +219,9 @@ function App({ componentMap, routes, initialComponentPath, initialParams, layout
         const match = getMatch(currentPath);
 
         if (match) {
-            const wrapper = componentMap[match.componentPath];
+            // MÁGICA DO HMR: Pega os componentes mais recentes que o Esbuild injetou no window
+            const compMap = (window as any).__NYTLEX_COMPONENTS__ || componentMap;
+            const wrapper = compMap[match.componentPath];
             setParams(match.params);
 
             let componentToRender = wrapper;
@@ -226,6 +298,16 @@ function App({ componentMap, routes, initialComponentPath, initialParams, layout
         };
     }, [updateRoute]);
 
+    // Escuta o evento customizado para forçar o Router do React a engolir a nova rota silenciosamente
+    useEffect(() => {
+        const handleHmrSwap = () => {
+            console.log('[Nytlex] ⚛️ React HMR Swap: Re-avaliando a rota com novos componentes...');
+            updateRoute();
+        };
+        window.addEventListener('nytlex:react-hmr-swap', handleHmrSwap);
+        return () => window.removeEventListener('nytlex:react-hmr-swap', handleHmrSwap);
+    }, [updateRoute]);
+
     // Renderização
     let resolvedContent: React.ReactNode;
     if (!CurrentPageComponent || initialComponentPath === '__404__') {
@@ -242,7 +324,10 @@ function App({ componentMap, routes, initialComponentPath, initialParams, layout
             ? React.createElement(layoutComponent, { children: NotFoundContent })
             : NotFoundContent;
     } else {
-        const PageContent = <CurrentPageComponent key={`page-${hmrTimestamp}`} params={params} />;
+        // MUITO IMPORTANTE: Retirei o `key={"page-" + hmrTimestamp}` daqui.
+        // Se a key mudar a cada HMR, o React desmonta a tela toda e perde os estados.
+        // Com uma key fixa, o Fast-Refresh atua magicamente mantendo os inputs/estados vivos.
+        const PageContent = <CurrentPageComponent key="nytlex-page" params={params} />;
         resolvedContent = typeof layoutComponent === "function"
             ? React.createElement(layoutComponent, { children: PageContent })
             : <div>{PageContent}</div>;
@@ -333,8 +418,14 @@ async function initializeClient() {
     }
 }
 
-if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', initializeClient);
-} else {
-    setTimeout(initializeClient, 0);
+// TRAVA DE SEGURANÇA MÁXIMA: Garante que o App só vai dar mount 1 ÚNICA VEZ.
+// Sem isso, a re-importação do HMR causava a re-execução deste arquivo, rodando o initializeClient()
+// e consequentemente chamando root.unmount() e fazendo a tela toda piscar perdendo os estados tlgd.
+if (!(window as any).__NYTLEX_INITIALIZED__) {
+    (window as any).__NYTLEX_INITIALIZED__ = true;
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', initializeClient);
+    } else {
+        setTimeout(initializeClient, 0);
+    }
 }

@@ -26,6 +26,49 @@ import {
 import '../themes/DevBadge';
 import '../themes/ErrorModal';
 
+// --- NOVA LÓGICA DE FAST-REFRESH (SOFT-RELOAD) ---
+if (process.env.NODE_ENV !== 'production' && typeof window !== 'undefined') {
+    if (!(window as any).__NYTLEX_HMR_SETUP__) {
+        (window as any).__NYTLEX_HMR_SETUP__ = true;
+
+        window.addEventListener('nytlex:hmr-update', async (e: any) => {
+            console.log('[Nytlex] 🟠 HMR Recebido! Sincronizando módulos...');
+            try {
+                const files = e.detail?.files || [];
+                const jsFiles = files.filter((f: string) => f.endsWith('.js') || f.endsWith('.mjs') || f.endsWith('.ts'));
+
+                if (jsFiles.length > 0) {
+                    for (const file of jsFiles) {
+                        let publicPath = '';
+                        const parts = file.replace(/\\/g, '/').split('/');
+                        const rootDirs = ['chunks', 'assets', 'pages'];
+                        const idx = parts.findIndex((p: string) => rootDirs.includes(p) || p.includes('entry.client'));
+
+                        if (idx !== -1) {
+                            publicPath = '/_nytlex/' + parts.slice(idx).join('/');
+                        } else {
+                            publicPath = '/_nytlex/' + parts[parts.length - 1];
+                        }
+
+                        try {
+                            // Baixa a nova versão do arquivo na memória do navegador
+                            await import(publicPath + '?hmr=' + Date.now());
+                        } catch (err) {
+                            console.warn(`[Nytlex] Falha ao injetar ${publicPath}`, err);
+                        }
+                    }
+
+                    // Dispara evento interno pro Svelte remontar a rota com os componentes recém-baixados
+                    window.dispatchEvent(new CustomEvent('nytlex:svelte-hmr-swap'));
+                }
+            } catch (err) {
+                console.warn('[Nytlex] HMR falhou, forçando reload da página...', err);
+                window.location.reload();
+            }
+        });
+    }
+}
+
 declare global {
     interface Window {
         __NYTLEX_ROUTES__?: any[];
@@ -35,6 +78,7 @@ declare global {
         __NYTLEX_DEFAULT_NOT_FOUND__?: { getDefaultNotFound: () => string };
         __NYTLEX_BUILD_ERROR__?: NytlexBuildError | null;
         __NYTLEX_SVELTE_INSTANCE__?: any;
+        __NYTLEX_SVELTE_PAGE_INSTANCE__?: any; // <--- Referência direta para a página isolada
         __NYTLEX_LAYOUT_METADATA__?: Metadata;
     }
 }
@@ -90,8 +134,7 @@ async function renderRoute(routes: any[], componentMap: Record<string, any>, isI
     let ActualPageComponent = PageComponent;
     const LayoutComponent = window.__NYTLEX_LAYOUT__;
 
-    // PRELOAD DO CHUNK: Resolvemos a Promise da página ANTES de tocar no DOM.
-    // Isso garante que o Svelte não jogue o HTML do SSR fora pra renderizar uma tela vazia.
+    // PRELOAD DO CHUNK
     if (PageComponent && typeof PageComponent.__importFunc === 'function') {
         try {
             const actualModule = await PageComponent.__importFunc();
@@ -168,7 +211,6 @@ async function renderRoute(routes: any[], componentMap: Record<string, any>, isI
 
 function mountSvelteComponent(PageComponent: any, params: any, LayoutComponent: any, target: HTMLElement, isInitialRender: boolean) {
     try {
-        // Verifica se há SSR no container para usarmos "Hidratação" e não "Mount"
         const hasSSRHtml = isInitialRender && target.hasChildNodes();
         const useSvelte5Hydrate = hasSSRHtml && typeof hydrate === 'function';
 
@@ -182,7 +224,6 @@ function mountSvelteComponent(PageComponent: any, params: any, LayoutComponent: 
                         render: () => '<div style="display:contents" class="nytlex-page-wrapper"></div>',
                         setup: (node: Element) => {
                             if (typeof mount === 'function') {
-                                // Svelte 5: Usa hydrate se estivermos na carga inicial
                                 const svelteFn = useSvelte5Hydrate ? hydrate : mount;
                                 pageInstance = svelteFn(PageComponent, {
                                     target: node as HTMLElement,
@@ -218,7 +259,7 @@ function mountSvelteComponent(PageComponent: any, params: any, LayoutComponent: 
             } else {
                 currentAppInstance = new LayoutComponent({
                     target,
-                    hydrate: hasSSRHtml, // Fallback do Svelte 4
+                    hydrate: hasSSRHtml,
                     props: {
                         params,
                         $$slots: {
@@ -273,19 +314,32 @@ async function initializeClient() {
         );
 
         let pendingHmr: { file: string | null; timestamp: number } | null = null;
+
         setupHMREvents(async (file, timestamp) => {
             pendingHmr = { file, timestamp };
-            // HMR não usa Hidratação. Remonta tudo na marra!
-            await renderRoute(routes, componentMap, false);
+            await renderRoute(routes, window.__NYTLEX_COMPONENTS__ || componentMap, false);
             dispatchHmrReady(pendingHmr);
             pendingHmr = null;
         });
 
-        const handleRouteUpdate = () => renderRoute(routes, componentMap, false);
+        // Ouve o sinal do HMR recém baixado na memória e força a troca do componente Svelte
+        window.addEventListener('nytlex:svelte-hmr-swap', async () => {
+            console.log('[Nytlex] ♻️ Svelte HMR Swap: Trocando componente dinamicamente...');
+            const compMap = window.__NYTLEX_COMPONENTS__ || componentMap;
+            await renderRoute(routes, compMap, false);
+
+            // AGORA SIM: Dispara o evento de "hmr-ready" global, que o DevBadge ouve
+            // e retorna o estado dele para 'idle', parando de rodar o spinner kkkkkk.
+            const syntheticEvent = new CustomEvent('nytlex:hotreload', {
+                detail: { state: 'idle', payload: { success: true }, ts: Date.now() }
+            });
+            window.dispatchEvent(syntheticEvent);
+        });
+
+        const handleRouteUpdate = () => renderRoute(routes, window.__NYTLEX_COMPONENTS__ || componentMap, false);
         window.addEventListener('popstate', handleRouteUpdate);
         router.subscribe(handleRouteUpdate);
 
-        // O render inicial PASSA isInitialRender = true, ativando a hidratação SSR!
         await renderRoute(routes, componentMap, true);
 
     } catch (error: any) {
@@ -293,8 +347,12 @@ async function initializeClient() {
     }
 }
 
-if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', initializeClient);
-} else {
-    setTimeout(initializeClient, 0);
+// TRAVA DE SEGURANÇA MÁXIMA PARA EVITAR RE-EXECUÇÃO
+if (!(window as any).__NYTLEX_INITIALIZED__) {
+    (window as any).__NYTLEX_INITIALIZED__ = true;
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', initializeClient);
+    } else {
+        setTimeout(initializeClient, 0);
+    }
 }

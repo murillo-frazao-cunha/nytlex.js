@@ -20,6 +20,50 @@ import App from './App.vue';
 // Importa a lógica centralizada (agora usando findRouteForPath ao invés de getInitialClientData)
 import { findRouteForPath, renderCriticalError } from '../FrontCore';
 
+if (process.env.NODE_ENV !== 'production' && typeof window !== 'undefined') {
+    // PREVINE QUE O HMR REGISTRE O EVENTO MÚLTIPLAS VEZES
+    if (!(window as any).__NYTLEX_HMR_SETUP__) {
+        (window as any).__NYTLEX_HMR_SETUP__ = true;
+
+        // Escutando o nosso novo evento de HMR
+        window.addEventListener('nytlex:hmr-update', async (e: any) => {
+            console.log('[Nytlex] 🟢 HMR Recebido! Sincronizando módulos...');
+            try {
+                const files = e.detail?.files || [];
+                // Filtra os arquivos de script modificados
+                const jsFiles = files.filter((f: string) => f.endsWith('.js') || f.endsWith('.mjs') || f.endsWith('.ts'));
+
+                if (jsFiles.length > 0) {
+                    for (const file of jsFiles) {
+                        let publicPath = '';
+                        const parts = file.replace(/\\/g, '/').split('/');
+                        const rootDirs = ['chunks', 'assets', 'pages'];
+                        const idx = parts.findIndex((p: string) => rootDirs.includes(p) || p.includes('entry.client'));
+
+                        if (idx !== -1) {
+                            publicPath = '/_nytlex/' + parts.slice(idx).join('/');
+                        } else {
+                            publicPath = '/_nytlex/' + parts[parts.length - 1];
+                        }
+
+                        try {
+                            await import(publicPath + '?hmr=' + Date.now());
+                        } catch (err) {
+                            console.warn(`[Nytlex] Falha ao injetar ${publicPath}`, err);
+                        }
+                    }
+
+                    // 👉 A MÁGICA TÁ AQUI! Avisa o App.vue que baixou tudo e ele já pode atualizar
+                    window.dispatchEvent(new CustomEvent('nytlex:vue-hmr-swap'));
+                }
+            } catch (err) {
+                console.warn('[Nytlex] HMR falhou, forçando reload da página...', err);
+                window.location.reload();
+            }
+        });
+    }
+}
+
 declare global {
     interface Window {
         __NYTLEX_APP__?: VueApp;
@@ -123,8 +167,13 @@ async function initializeClient() {
     }
 }
 
-if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', initializeClient);
-} else {
-    setTimeout(initializeClient, 0);
+// TRAVA DE SEGURANÇA MÁXIMA: Garante que o App só vai dar mount 1 ÚNICA VEZ.
+// Evitando unmounts repentinos na tela caso haja uma re-execução fantasma de scripts no frontend
+if (!(window as any).__NYTLEX_INITIALIZED__) {
+    (window as any).__NYTLEX_INITIALIZED__ = true;
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', initializeClient);
+    } else {
+        setTimeout(initializeClient, 0);
+    }
 }

@@ -84,11 +84,18 @@ export class HotReloadManager {
         this.notifyClients('build-start');
     }
 
-    onBuildComplete(success: boolean, error?: any) {
+    onBuildComplete(success: boolean, error?: any, buildResult?: any) {
         if (success) {
             Console.dynamicLine(`Frontend build complete.`).end(`Batch processing completed.`);
             if (this.frontendChangeCallback) this.frontendChangeCallback();
-            this.notifyClients('frontend-reload');
+
+            // Extrai as saídas do metafile do esbuild (quais chunks mudaram)
+            // Se o buildResult vier null/undefined, envia payload vazio pra n dar pau
+            const changedOutputs = buildResult?.metafile ? Object.keys(buildResult.metafile.outputs) : [];
+
+            // Emitimos o evento de 'hmr-update' preparado pra injeção de Fast-Refresh
+            // Em vez de dar hard reload ('frontend-reload')
+            this.notifyClients('hmr-update', { files: changedOutputs });
         } else {
             Console.error("Captured Build Error:", error?.message || 'Unknown Esbuild error');
             // Repassa o objeto de erro (agora formatado em builder.js) diretamente pro frontend!
@@ -137,7 +144,8 @@ export class HotReloadManager {
                         Console.logWithout(Levels.INFO, undefined, `Structural changes detected in frontend (file added/removed). Triggering router rebuild...`);
                         if (this.frontendChangeCallback) this.frontendChangeCallback();
 
-                        // Enviamos um aviso de reload, caso o frontendChangeCallback não ative o esbuild
+                        // O framework de HMR no front vai precisar decidir se ele recarrega a pagina ou tenta injetar a nova rota.
+                        // Pra ser seguro, se estruturalmente mudou, a gente manda um reload classico.
                         this.notifyClients('frontend-reload');
                         frontendNeedsStructuralRebuild = false;
                     }
@@ -207,10 +215,19 @@ export class HotReloadManager {
                                         window.__NYTLEX_HOT_RELOAD__ = { state: 'reloading', payload: message.data, ts: Date.now() };
                                         dispatch('nytlex:hotreload', window.__NYTLEX_HOT_RELOAD__);
                                         break;
+                                    
+                                    // NOVO EVENTO PRA FAST-REFRESH E HMR
+                                    case 'hmr-update':
+                                        console.log('[nytlex] HMR Update received, propagating to framework...');
+                                        window.__NYTLEX_HOT_RELOAD__ = { state: 'hmr', payload: message.data, ts: Date.now() };
+                                        dispatch('nytlex:hotreload', window.__NYTLEX_HOT_RELOAD__);
+                                        dispatch('nytlex:hmr-update', message.data);
+                                        break;
+
                                     case 'frontend-reload':
                                     case 'backend-api-reload':
                                     case 'server-ready':
-                                        console.log('[nytlex] Changes applied, reloading page...');
+                                        console.log('[nytlex] Structural/Backend changes applied, full page reload...');
                                         dispatch('nytlex:hmr-ready', { files: message.data?.files });
                                         
                                         window.__NYTLEX_HOT_RELOAD__ = { state: 'idle', payload: { success: true }, ts: Date.now() };

@@ -1,32 +1,34 @@
 <template>
-  <component :is="resolvedLayout" v-if="resolvedLayout">
+  <div id="nytlex-vue-root">
+    <component :is="resolvedLayout" v-if="resolvedLayout">
+      <component
+          :is="resolvedContent"
+          v-bind="contentProps"
+          :key="`page-${currentPathKey}-${hmrKey}`"
+      />
+    </component>
+
     <component
+        v-else
         :is="resolvedContent"
         v-bind="contentProps"
-        :key="`page-${hmrTimestamp}-${currentPathKey}`"
+        :key="`page-${currentPathKey}-${hmrKey}`"
     />
-  </component>
 
-  <component
-      v-else
-      :is="resolvedContent"
-      v-bind="contentProps"
-      :key="`page-${hmrTimestamp}-${currentPathKey}`"
-  />
+    <nytlex-dev-badge
+        v-if="isMounted && isDev"
+        :has-build-error="!!buildError"
+        @click-build-error="isErrorOpen = true"
+    ></nytlex-dev-badge>
 
-  <nytlex-dev-badge
-      v-if="isMounted && isDev"
-      :has-build-error="!!buildError"
-      @click-build-error="isErrorOpen = true"
-  ></nytlex-dev-badge>
-
-  <nytlex-error-modal
-      v-if="isMounted"
-      .error="buildError"
-      .isOpen="isErrorOpen"
-      @close-modal="isErrorOpen = false"
-      @copy-log="handleCopyLog"
-  ></nytlex-error-modal>
+    <nytlex-error-modal
+        v-if="isMounted"
+        .error="buildError"
+        .isOpen="isErrorOpen"
+        @close-modal="isErrorOpen = false"
+        @copy-log="handleCopyLog"
+    ></nytlex-error-modal>
+  </div>
 </template>
 
 <script setup>
@@ -55,6 +57,7 @@ const props = defineProps({
 // --- Estado ---
 const isMounted = ref(false);
 const hmrTimestamp = ref(0); // Mudado de Date.now() para 0 para evitar mismatch de SSR
+const hmrKey = ref(0); // Chave para forçar o remount visual no Vue
 const currentPathKey = ref(window.location.pathname);
 const pendingHmrReady = ref(null);
 
@@ -66,8 +69,25 @@ const isDev = process.env.NODE_ENV !== 'production';
 let cleanupErrorEvents;
 let cleanupHmrEvents;
 let unsubscribeRouter;
+let hmrTimeout;
 
 const handleCopyLog = () => copyBuildError(buildError.value);
+
+const handleVueHmrSwap = () => {
+  clearTimeout(hmrTimeout);
+  // Espera os pacotes terminarem de injetar no __NYTLEX_COMPONENTS__ antes de atualizar
+  hmrTimeout = setTimeout(async () => {
+    console.log('[Nytlex] ♻️ Vue HMR Swap: Forçando atualização da rota com os novos pacotes...');
+    isFirstRender.value = false;
+    hmrKey.value++; // Altera a chave para forçar o Vue a redesenhar o componente do zero
+    await updateRoute();
+
+    // 👉 DESLIGA O DEV BADGE! Avisa ele pra parar de girar
+    window.dispatchEvent(new CustomEvent('nytlex:hotreload', {
+      detail: { state: 'idle', payload: { success: true }, ts: Date.now() }
+    }));
+  }, 50);
+};
 
 watch(hmrTimestamp, async (timestamp) => {
   if (!pendingHmrReady.value || pendingHmrReady.value.timestamp !== timestamp) return;
@@ -86,9 +106,13 @@ const updateRoute = async () => {
   const currentPath = window.location.pathname.replace("index.html", '');
   currentPathKey.value = currentPath;
 
+  // CHAVE DA MÁGICA: Sempre buscar do window.__NYTLEX_COMPONENTS__ pois o entry.client
+  // atualiza esse objeto global ao baixar a nova versão do main.js via import()
+  const compMap = window.__NYTLEX_COMPONENTS__ || props.componentMap;
+
   const match = findRouteForPath(currentPath, props.routes);
   if (match) {
-    const wrapper = props.componentMap[match.componentPath];
+    const wrapper = compMap[match.componentPath];
     params.value = match.params;
 
     let componentToRender = wrapper;
@@ -98,7 +122,7 @@ const updateRoute = async () => {
       componentToRender = props.initialResolvedComponent || wrapper;
       CurrentPageComponent.value = componentToRender;
     } else {
-      // Na navegação via SPA, resolvemos o chunk antes de atualizar a tela
+      // Na navegação via SPA ou no HMR, resolvemos o chunk fresco antes de atualizar a tela
       if (wrapper && typeof wrapper.__importFunc === 'function') {
         try {
           const m = await wrapper.__importFunc();
@@ -202,6 +226,7 @@ onMounted(() => {
 
   window.addEventListener('popstate', updateRoute);
   unsubscribeRouter = router.subscribe(updateRoute);
+  window.addEventListener('nytlex:vue-hmr-swap', handleVueHmrSwap);
 });
 
 onUnmounted(() => {
@@ -210,5 +235,6 @@ onUnmounted(() => {
 
   window.removeEventListener('popstate', updateRoute);
   if (unsubscribeRouter) unsubscribeRouter();
+  window.removeEventListener('nytlex:vue-hmr-swap', handleVueHmrSwap);
 });
 </script>

@@ -216,7 +216,7 @@ const customVuePlugin = (opts = {}) => {
                 const { descriptor } = sfc.parse(source, { filename });
 
                 // CORREÇÃO APLICADA: Passando templateOptions para o compileScript ter ciência dos elementos customizados
-                const script = (descriptor.script || descriptor.scriptSetup) ? sfc.compileScript(descriptor, {
+                const scriptData = (descriptor.script || descriptor.scriptSetup) ? sfc.compileScript(descriptor, {
                     id,
                     fs: ts.sys,
                     sourceMap: !!buildOpts.sourcemap,
@@ -231,9 +231,11 @@ const customVuePlugin = (opts = {}) => {
 
                 if (descriptor.script || descriptor.scriptSetup) {
                     const src = (descriptor.script && !descriptor.scriptSetup && descriptor.script.src) || encPath;
-                    // Suporte aos exports nomeados coexistindo com o default
+                    // FIX: Evita quebra caso o .vue possua apenas exports nomeados (sem export default)
                     code += `export * from "${src}?type=script";\n`;
-                    code += `import script from "${src}?type=script";\n`;
+                    code += `import * as __scriptModule from "${src}?type=script";\n`;
+                    code += "const importedWildCard = ['defa', 'ult'].join('');\n";
+                    code += `const script = __scriptModule[importedWildCard] || {};\n`;
                 } else {
                     code += "const script = {};\n";
                 }
@@ -274,7 +276,7 @@ const customVuePlugin = (opts = {}) => {
                 return {
                     contents: code,
                     resolveDir: path.dirname(args.path),
-                    pluginData: { descriptor, id: dataId, script, source, sourceMapPath },
+                    pluginData: { descriptor, id: dataId, script: scriptData, source, sourceMapPath },
                     watchFiles: [ args.path ]
                 };
             }));

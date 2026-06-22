@@ -37,8 +37,6 @@ import { getBuildingScreenHtml } from '../themes/BuildingPage';
 import { getServerErrorHtml } from '../themes/ServerError';
 polyfillBrowserEnv();
 
-
-
 async function withSilencedConsoleAsync<T>(fn: () => Promise<T>): Promise<T> {
     const originalLog = console.log;
     const originalWarn = console.warn;
@@ -157,7 +155,7 @@ interface RenderOptions {
 export async function renderVue({ req, res, route, params, allRoutes }: RenderOptions): Promise<void> {
 
     // EXTRAÍMOS FRAGMENT E COMMENT VNODE NATIVOS DO VUE
-    const { createSSRApp, h, Fragment, createCommentVNode } = vue;
+    const { createSSRApp, h, createCommentVNode } = vue;
     const { renderToString } = vueServerRenderer as any;
     const { generateMetadata } = route;
     const isProduction = !(req as any).hwebDev;
@@ -216,10 +214,10 @@ export async function renderVue({ req, res, route, params, allRoutes }: RenderOp
                         const pageNode = PageComponent ? h(PageComponent as any, { params }) : h('div', 'Page not found');
                         const mainNode = LayoutComponent ? h(LayoutComponent, null, { default: () => pageNode }) : pageNode;
 
-                        // A MÁGICA: Retornamos um Fragmento imitando o App.vue
-                        // Injetamos os nós de comentários que simulam os componentes Web (DevBadge e ErrorModal)
-                        // que possuem v-if="false" no lado do servidor/primeiro render.
-                        return h(Fragment, null, [
+                        // A CORREÇÃO: Em vez de renderizar um Fragment na raiz do SSR, renderizamos uma div
+                        // com id="nytlex-vue-root". Isso bate de forma idêntica com o App.vue atualizado que
+                        // está no Canvas, evitando qualquer erro de Hydration Mismatch!
+                        return h('div', { id: 'nytlex-vue-root' }, [
                             mainNode,
                             createCommentVNode("v-if", true),
                             createCommentVNode("v-if", true)
@@ -252,9 +250,6 @@ export async function renderVue({ req, res, route, params, allRoutes }: RenderOp
         res.end(finalHtml);
 
     } catch (err) {
-        // Removemos o console.error original daqui para evitar ruído.
-        // O erro já será mostrado formatado no front-end.
-
         // Fallback para o ServerError Vanilla
         let errorHtml = getServerErrorHtml({
             error: err,
