@@ -73,20 +73,18 @@ let hmrTimeout;
 
 const handleCopyLog = () => copyBuildError(buildError.value);
 
-const handleVueHmrSwap = () => {
-  clearTimeout(hmrTimeout);
-  // Espera os pacotes terminarem de injetar no __NYTLEX_COMPONENTS__ antes de atualizar
-  hmrTimeout = setTimeout(async () => {
-    console.log('[Nytlex] ♻️ Vue HMR Swap: Forçando atualização da rota com os novos pacotes...');
-    isFirstRender.value = false;
-    hmrKey.value++; // Altera a chave para forçar o Vue a redesenhar o componente do zero
-    await updateRoute();
+// OTIMIZAÇÃO: Transformado em async e removido o setTimeout de 50ms
+const handleVueHmrSwap = async () => {
+  console.log('[Nytlex] ♻️ Vue HMR Swap: Forçando atualização da rota com os novos pacotes...');
+  isFirstRender.value = false;
+  hmrKey.value++; // Altera a chave para forçar o Vue a redesenhar o componente do zero
 
-    // 👉 DESLIGA O DEV BADGE! Avisa ele pra parar de girar
-    window.dispatchEvent(new CustomEvent('nytlex:hotreload', {
-      detail: { state: 'idle', payload: { success: true }, ts: Date.now() }
-    }));
-  }, 50);
+  await updateRoute();
+
+  // 👉 DESLIGA O DEV BADGE! Avisa ele pra parar de girar
+  window.dispatchEvent(new CustomEvent('nytlex:hotreload', {
+    detail: { state: 'idle', payload: { success: true }, ts: Date.now() }
+  }));
 };
 
 watch(hmrTimestamp, async (timestamp) => {

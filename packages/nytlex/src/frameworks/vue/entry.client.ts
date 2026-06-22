@@ -27,14 +27,17 @@ if (process.env.NODE_ENV !== 'production' && typeof window !== 'undefined') {
 
         // Escutando o nosso novo evento de HMR
         window.addEventListener('nytlex:hmr-update', async (e: any) => {
-            console.log('[Nytlex] 🟢 HMR Recebido! Sincronizando módulos...');
+            console.log('[Nytlex] 🟢 HMR Recebido! Sincronizando módulos em paralelo...');
             try {
                 const files = e.detail?.files || [];
                 // Filtra os arquivos de script modificados
                 const jsFiles = files.filter((f: string) => f.endsWith('.js') || f.endsWith('.mjs') || f.endsWith('.ts'));
 
                 if (jsFiles.length > 0) {
-                    for (const file of jsFiles) {
+                    const hmrTimestamp = Date.now();
+
+                    // OTIMIZAÇÃO: Promise.all para importar tudo em paralelo
+                    const importPromises = jsFiles.map((file: string) => {
                         let publicPath = '';
                         const parts = file.replace(/\\/g, '/').split('/');
                         const rootDirs = ['chunks', 'assets', 'pages'];
@@ -46,12 +49,13 @@ if (process.env.NODE_ENV !== 'production' && typeof window !== 'undefined') {
                             publicPath = '/_nytlex/' + parts[parts.length - 1];
                         }
 
-                        try {
-                            await import(publicPath + '?hmr=' + Date.now());
-                        } catch (err) {
+                        return import(publicPath + '?hmr=' + hmrTimestamp).catch(err => {
                             console.warn(`[Nytlex] Falha ao injetar ${publicPath}`, err);
-                        }
-                    }
+                        });
+                    });
+
+                    // Aguarda todos os imports terminarem de uma vez
+                    await Promise.all(importPromises);
 
                     // 👉 A MÁGICA TÁ AQUI! Avisa o App.vue que baixou tudo e ele já pode atualizar
                     window.dispatchEvent(new CustomEvent('nytlex:vue-hmr-swap'));

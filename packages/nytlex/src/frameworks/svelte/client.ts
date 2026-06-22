@@ -15,7 +15,7 @@
  * limitations under the License.
  */
 export { default as Link } from './components/Link.svelte';
-export { RouteConfig, Metadata } from "../../types.ts";
+export { Metadata } from "../../types.ts";
 export { router } from '../../client/clientRouter.ts';
 export { requireDynamic } from '../../client/requireDynamic.ts';
 

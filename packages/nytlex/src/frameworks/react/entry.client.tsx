@@ -42,7 +42,10 @@ if (process.env.NODE_ENV !== 'production' && typeof window !== 'undefined') {
                 const jsFiles = files.filter((f: string) => f.endsWith('.js') || f.endsWith('.jsx') || f.endsWith('.mjs') || f.endsWith('.ts') || f.endsWith('.tsx'));
 
                 if (jsFiles.length > 0) {
-                    for (const file of jsFiles) {
+                    const hmrTimestamp = Date.now();
+
+                    // OTIMIZAÇÃO: Promise.all para importar tudo em paralelo
+                    const importPromises = jsFiles.map((file: string) => {
                         let publicPath = '';
                         const parts = file.replace(/\\/g, '/').split('/');
                         const rootDirs = ['chunks', 'assets', 'pages'];
@@ -51,19 +54,16 @@ if (process.env.NODE_ENV !== 'production' && typeof window !== 'undefined') {
                         if (idx !== -1) {
                             publicPath = '/_nytlex/' + parts.slice(idx).join('/');
                         } else {
-                            // Fallback, pega o nome final
                             publicPath = '/_nytlex/' + parts[parts.length - 1];
                         }
 
-
-                        try {
-                            // O import() força o navegador a buscar e EXECUTAR a nova versão do arquivo.
-                            // Ao executar, o plugin babel/esbuild registra a nova versão dos componentes.
-                            await import(publicPath + '?hmr=' + Date.now());
-                        } catch (err) {
+                        return import(publicPath + '?hmr=' + hmrTimestamp).catch(err => {
                             console.warn(`[Nytlex] Falha ao injetar ${publicPath}`, err);
-                        }
-                    }
+                        });
+                    });
+
+                    // Aguarda todos os imports terminarem de uma vez
+                    await Promise.all(importPromises);
                 }
 
                 // AGORA SIM! Com o código novo em memória e as funções de cache salvas, o React faz o patch na tela sem piscar!

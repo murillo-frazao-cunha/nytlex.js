@@ -17,7 +17,7 @@
 
 // Este arquivo exporta apenas código seguro para o cliente (navegador)
 export { Link } from './components/Link.tsx';
-export { RouteConfig, Metadata } from "../../types.ts";
+export { Metadata } from "../../types.ts";
 export { router } from '../../client/clientRouter.ts';
 export { requireDynamic } from '../../client/requireDynamic.ts';
 

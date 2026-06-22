@@ -19,7 +19,7 @@
 import Link from "./components/Link.vue"
 import {cachedFramework} from "../../api/framework.ts";
 export { Link }
-export { RouteConfig, Metadata } from "../../types.ts";
+export { Metadata } from "../../types.ts";
 export { router } from '../../client/clientRouter.ts';
 export { requireDynamic } from '../../client/requireDynamic.ts';
 // RPC (client-side)

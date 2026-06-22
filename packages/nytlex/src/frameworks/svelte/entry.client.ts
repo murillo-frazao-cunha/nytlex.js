@@ -38,7 +38,10 @@ if (process.env.NODE_ENV !== 'production' && typeof window !== 'undefined') {
                 const jsFiles = files.filter((f: string) => f.endsWith('.js') || f.endsWith('.mjs') || f.endsWith('.ts'));
 
                 if (jsFiles.length > 0) {
-                    for (const file of jsFiles) {
+                    const hmrTimestamp = Date.now();
+
+                    // OTIMIZAÇÃO: Promise.all para importar tudo em paralelo
+                    const importPromises = jsFiles.map((file: string) => {
                         let publicPath = '';
                         const parts = file.replace(/\\/g, '/').split('/');
                         const rootDirs = ['chunks', 'assets', 'pages'];
@@ -50,16 +53,16 @@ if (process.env.NODE_ENV !== 'production' && typeof window !== 'undefined') {
                             publicPath = '/_nytlex/' + parts[parts.length - 1];
                         }
 
-                        try {
-                            // Baixa a nova versão do arquivo na memória do navegador
-                            await import(publicPath + '?hmr=' + Date.now());
-                        } catch (err) {
+                        return import(publicPath + '?hmr=' + hmrTimestamp).catch(err => {
                             console.warn(`[Nytlex] Falha ao injetar ${publicPath}`, err);
-                        }
-                    }
+                        });
+                    });
 
-                    // Dispara evento interno pro Svelte remontar a rota com os componentes recém-baixados
-                    window.dispatchEvent(new CustomEvent('nytlex:svelte-hmr-swap'));
+                    // Aguarda todos os imports terminarem de uma vez
+                    await Promise.all(importPromises);
+
+                    // 👉 A MÁGICA TÁ AQUI! Avisa o App.vue que baixou tudo e ele já pode atualizar
+                    window.dispatchEvent(new CustomEvent('nytlex:vue-hmr-swap'));
                 }
             } catch (err) {
                 console.warn('[Nytlex] HMR falhou, forçando reload da página...', err);
