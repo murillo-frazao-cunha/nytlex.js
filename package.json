@@ -1,6 +1,6 @@
 {
   "name": "nytlex-framework",
-  "version": "0.0.6-canary.1",
+  "version": "0.0.6-canary.2",
   "description": "Monorepo for the Nytlex.js framework",
   "private": true,
   "author": "mfraz",
