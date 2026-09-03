@@ -250,7 +250,6 @@ function App({ componentMap, routes, initialComponentPath, initialParams, layout
             if (typeof generateMetadataFn === 'function') {
                 try {
                     const dynamicMeta = await generateMetadataFn({ params: match.params });
-                    console.log(dynamicMeta)
                     if (dynamicMeta && dynamicMeta.title) {
                         pageTitle = dynamicMeta.title;
                     }
