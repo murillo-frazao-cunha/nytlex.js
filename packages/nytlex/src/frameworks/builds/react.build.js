@@ -15,11 +15,53 @@
  * limitations under the License.
  */
 
+const fs = require("fs");
+
+/**
+ * Plugin customizado para registrar metadados e Fast Refresh em componentes React
+ */
+const customReactPlugin = () => {
+    return {
+        name: "nytlex-react-metadata",
+        setup(build) {
+            build.onLoad({ filter: /\.(jsx|tsx|js|ts)$/ }, async (args) => {
+                // Ignora arquivos do node_modules
+                if (args.path.includes("node_modules")) return;
+
+                const contents = await fs.promises.readFile(args.path, "utf8");
+
+                // Verifica se o arquivo expõe funções de metadata
+                const hasGenerateMetadata = /export\s+(async\s+)?function\s+generateMetadata/.test(contents) || /export\s+const\s+generateMetadata/.test(contents);
+                const hasGetMetadata = /export\s+(async\s+)?function\s+getMetadata/.test(contents) || /export\s+const\s+getMetadata/.test(contents);
+
+                if (!hasGenerateMetadata && !hasGetMetadata) return;
+
+                let transformedCode = contents;
+
+                // Anexa a função de metadata diretamente ao export default do componente
+                if (hasGenerateMetadata) {
+                    transformedCode += `\nif (typeof exports !== 'undefined' && exports.default) { exports.default.generateMetadata = generateMetadata; }`;
+                    transformedCode += `\nif (typeof module !== 'undefined' && module.exports && module.exports.default) { module.exports.default.generateMetadata = generateMetadata; }`;
+                }
+                if (hasGetMetadata) {
+                    transformedCode += `\nif (typeof exports !== 'undefined' && exports.default) { exports.default.getMetadata = getMetadata; }`;
+                    transformedCode += `\nif (typeof module !== 'undefined' && module.exports && module.exports.default) { module.exports.default.getMetadata = getMetadata; }`;
+                }
+
+                return {
+                    contents: transformedCode,
+                    loader: args.path.endsWith("tsx") ? "tsx" : args.path.endsWith("ts") ? "ts" : "jsx",
+                };
+            });
+        }
+    };
+};
+
 /**
  * Cria a configuração do Esbuild otimizada para React
  */
 async function createReactConfig(entryPoint, outdir, isProduction, { prePlugins = [], postPlugins = [], isWatch = false } = {}) {
-    const mode = process.env.NYTLEX_MODE || 'build'
+    const mode = process.env.NYTLEX_MODE || 'build';
 
     return {
         entryPoints: [entryPoint],
@@ -38,7 +80,6 @@ async function createReactConfig(entryPoint, outdir, isProduction, { prePlugins 
 
         jsx: 'automatic',
 
-        // INJEÇÃO REAL: Isso cria a variável no objeto window do navegador de verdade
         banner: {
             js: `window.__NYTLEX_MODE__ = ${JSON.stringify(mode)};`
         },
@@ -48,7 +89,6 @@ async function createReactConfig(entryPoint, outdir, isProduction, { prePlugins 
             'process.env.PORT': JSON.stringify(process.nytlex?.port || 3000),
             '__VERSION__': '"1.0.0"',
             'process.env.NYTLEX_MODE': JSON.stringify(mode)
-            // Removido o window.__NYTLEX_MODE__ daqui, pois o banner já resolve
         },
 
         loader: {
@@ -65,6 +105,7 @@ async function createReactConfig(entryPoint, outdir, isProduction, { prePlugins 
 
         plugins: [
             ...prePlugins,
+            customReactPlugin(), // Injeta a captura de metadata no React
             ...postPlugins
         ],
 
